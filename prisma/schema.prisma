@@ -1,0 +1,120 @@
+// Meta Creatives Generator — data model
+// Project -> (BusinessProfile, MarketProfile, FounderPhotos, Angles, CreativeBriefs -> Creatives)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Project {
+  id            String   @id @default(cuid())
+  name          String
+  niche         String
+  service       String
+  audience      String
+  offer         String
+  websiteUrl    String?
+  igUrl         String?
+  fbUrl         String?
+  notes         String?
+  featureFounder Boolean @default(false)
+  creativeCount Int      @default(10)
+
+  // Pipeline status: idle | researching | profiling | market | angles | briefs | art | rendering | scoring | done | error
+  status        String   @default("idle")
+  statusDetail  String?  // human-readable progress, e.g. "Rendering 3/10"
+  error         String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  rawResearch     String?          // raw scraped website text (truncated)
+  visualAnchor    String?          // locked 50-75 word image generation modifier for this brand
+  businessProfile BusinessProfile?
+  marketProfile   MarketProfile?
+  founderPhotos   FounderPhoto[]
+  angles          Angle[]
+  briefs          CreativeBrief[]
+  creatives       Creative[]
+}
+
+model FounderPhoto {
+  id          String  @id @default(cuid())
+  projectId   String
+  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  originalPath String // relative path under /data
+  cutoutPath  String?  // background-removed PNG
+  createdAt   DateTime @default(now())
+}
+
+model BusinessProfile {
+  id        String   @id @default(cuid())
+  projectId String   @unique
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  data      String   // JSON: brandName, industry, service, offer, founder, brandTone, socialProof[], testimonials[], usp, pricingSignals, brandColors[], visualStyle
+  createdAt DateTime @default(now())
+}
+
+model MarketProfile {
+  id        String   @id @default(cuid())
+  projectId String   @unique
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  data      String   // JSON: painPoints[], desiredOutcomes[], motivations[], objections[], commonOffers[], buyerPsychology, visualExpectations, adPatterns
+  createdAt DateTime @default(now())
+}
+
+model Angle {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  type      String   // pain | transformation | authority | offer | case-study | urgency | comparison | myth-busting | convenience | social-proof | community | expert | lifestyle | future-self | risk-reversal
+  hook      String
+  rationale String
+  selected  Boolean  @default(false)
+  preScore  Float    @default(0)
+  createdAt DateTime @default(now())
+
+  brief     CreativeBrief?
+}
+
+model CreativeBrief {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  angleId   String   @unique
+  angle     Angle    @relation(fields: [angleId], references: [id], onDelete: Cascade)
+  data      String   // JSON: goal, emotion, headline, subheadline, supportingCopy, offer, cta, visualConcept, trustElements[], authorityElements[], socialProofElements[], layoutType, designStyle, artDirection{...}
+  layoutType String
+  createdAt DateTime @default(now())
+
+  creative  Creative?
+}
+
+model Creative {
+  id           String   @id @default(cuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  briefId      String   @unique
+  brief        CreativeBrief @relation(fields: [briefId], references: [id], onDelete: Cascade)
+
+  index        Int      // 1-based position in the batch
+  mode         String   // founder | banner
+  layoutType   String
+  imagePrompt  String?  // backdrop-only prompt sent to image model (null for pure-CSS banners)
+  bgImagePath  String?  // AI-generated backdrop, relative under /data
+  founderCutoutPath String? // chosen founder cutout for this creative
+  finalPngPath String?  // exported 1080x1080 PNG, relative under /data
+
+  editableText String   // JSON: { headline, subheadline, supportingCopy, offer, cta } — mutable for live editing
+  artDirection String   // JSON snapshot of colors/typography used by the renderer
+
+  score        String?  // JSON: per-criterion scores + notes
+  overallScore Float?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}

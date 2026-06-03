@@ -1,0 +1,207 @@
+import { prisma } from "@/lib/db";
+import { researchWebsite } from "./research";
+import { buildBusinessProfile } from "./businessProfile";
+import { buildMarketProfile } from "./market";
+import { generateVisualAnchor } from "./visualAnchor";
+import { generateAnglePool, selectAngles } from "./angles";
+import { generateBriefs } from "./briefs";
+import { buildBackdropPrompt } from "./imagePrompt";
+import { scoreCreative } from "./score";
+import { generateImage } from "@/lib/openai/client";
+import { renderCreativePng, closeBrowser } from "@/lib/export";
+import { saveFile } from "@/lib/storage";
+import { config } from "@/lib/env";
+import type { ArtDirection, CreativeBrief, EditableText } from "@/lib/types";
+
+async function setStatus(id: string, status: string, detail?: string) {
+  await prisma.project.update({ where: { id }, data: { status, statusDetail: detail ?? null } });
+}
+
+function clampArt(art: ArtDirection, hasBackdrop: boolean): ArtDirection {
+  if (art.backgroundStyle === "photo-backdrop" && !hasBackdrop) {
+    return { ...art, backgroundStyle: "gradient" };
+  }
+  if (hasBackdrop) {
+    return { ...art, backgroundStyle: "photo-backdrop" };
+  }
+  return art;
+}
+
+function editableFromBrief(b: CreativeBrief): EditableText {
+  return {
+    headline: b.headline,
+    subheadline: b.subheadline,
+    supportingCopy: b.supportingCopy,
+    offer: b.offer,
+    cta: b.cta,
+  };
+}
+
+export async function runPipeline(projectId: string): Promise<void> {
+  try {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      include: { founderPhotos: true },
+    });
+    if (!project) return;
+
+    const hasPhotos = project.founderPhotos.some((p) => p.cutoutPath);
+    const mode: "founder" | "banner" = project.featureFounder && hasPhotos ? "founder" : "banner";
+    const cutouts = project.founderPhotos.map((p) => p.cutoutPath!).filter(Boolean);
+
+    // [1] Research — extract expert intelligence from website (content focus, not colors/fonts)
+    await setStatus(projectId, "researching", project.websiteUrl ? "Reading website" : "Skipping (no URL)");
+    const research = await researchWebsite(project.websiteUrl);
+
+    // [2] Business profile — WHO is this expert and WHY should anyone choose them
+    await setStatus(projectId, "profiling");
+    const profile = await buildBusinessProfile({
+      name: project.name, niche: project.niche, service: project.service,
+      audience: project.audience, offer: project.offer, notes: project.notes,
+      igUrl: project.igUrl, fbUrl: project.fbUrl, research,
+    });
+    await prisma.project.update({ where: { id: projectId }, data: { rawResearch: research.text || null } });
+    await prisma.businessProfile.upsert({
+      where: { projectId }, create: { projectId, data: JSON.stringify(profile) },
+      update: { data: JSON.stringify(profile) },
+    });
+
+    // [3] Market understanding — niche audience psychology + design patterns (typography, proportion, photography)
+    await setStatus(projectId, "market");
+    const market = await buildMarketProfile(project.niche, project.audience, profile);
+    await prisma.marketProfile.upsert({
+      where: { projectId }, create: { projectId, data: JSON.stringify(market) },
+      update: { data: JSON.stringify(market) },
+    });
+
+    // [3.5] Visual Anchor — locked brand-specific image generation modifier for the whole batch
+    await setStatus(projectId, "anchoring", "Locking visual identity");
+    const anchor = await generateVisualAnchor(profile, market);
+    await prisma.project.update({ where: { id: projectId }, data: { visualAnchor: anchor.modifier } });
+
+    // [4] Angles — generate pool (3× needed), select strongest with type diversity
+    await setStatus(projectId, "angles", "Generating angle pool");
+    const pool = await generateAnglePool(project.creativeCount, profile, market);
+    const selected = selectAngles(pool, project.creativeCount);
+
+    await prisma.angle.deleteMany({ where: { projectId } });
+    const selectedHooks = new Set(selected.map((a) => a.hook));
+    const angleRows = await Promise.all(
+      pool.map((a) =>
+        prisma.angle.create({
+          data: {
+            projectId, type: a.type, hook: a.hook, rationale: a.rationale,
+            selected: selectedHooks.has(a.hook), preScore: (a as { preScore?: number }).preScore ?? 0,
+          },
+        })
+      )
+    );
+    const selectedRows = angleRows.filter((r) => r.selected).slice(0, project.creativeCount);
+
+    // [5] Briefs — full creative brief + art direction per angle (with market intelligence context)
+    await setStatus(projectId, "briefs", `Writing ${selectedRows.length} briefs`);
+    const briefs = await generateBriefs(
+      selectedRows.map((r) => ({ type: r.type as never, hook: r.hook, rationale: r.rationale })),
+      mode, profile, market
+    );
+
+    // [6] Art direction — save briefs + creatives. Inject founderZone from market profile into art direction.
+    await setStatus(projectId, "art");
+    await prisma.creativeBrief.deleteMany({ where: { projectId } });
+    await prisma.creative.deleteMany({ where: { projectId } });
+
+    type Prepared = { creativeId: string; brief: CreativeBrief };
+    const prepared: Prepared[] = [];
+
+    for (let i = 0; i < briefs.length; i++) {
+      const brief = briefs[i];
+      const angleRow = selectedRows[i] ?? selectedRows[0];
+
+      // Inject founderZone from niche market research into the stored art direction.
+      // This controls how much of the canvas the founder occupies in the layout components.
+      const artWithZone: ArtDirection = {
+        ...brief.artDirection,
+        founderZone: market.founderProportionZone,
+      };
+
+      const briefRow = await prisma.creativeBrief.create({
+        data: {
+          projectId, angleId: angleRow.id, layoutType: brief.layoutType,
+          data: JSON.stringify(brief),
+        },
+      });
+      const creative = await prisma.creative.create({
+        data: {
+          projectId, briefId: briefRow.id, index: i + 1, mode, layoutType: brief.layoutType,
+          founderCutoutPath: mode === "founder" ? cutouts[i % cutouts.length] : null,
+          editableText: JSON.stringify(editableFromBrief(brief)),
+          artDirection: JSON.stringify(clampArt(artWithZone, false)),
+        },
+      });
+      prepared.push({ creativeId: creative.id, brief });
+    }
+
+    // [7] Rendering — backdrop (founder only, with visual anchor + composition guidance) + Playwright PNG
+    const visualAnchorText = anchor.modifier;
+    for (let i = 0; i < prepared.length; i++) {
+      const { creativeId, brief } = prepared[i];
+      await setStatus(projectId, "rendering", `Rendering ${i + 1}/${prepared.length}`);
+
+      if (mode === "founder" && config.founderAiBackdrop) {
+        try {
+          // Backdrop prompt = visual anchor (brand-consistent) + scene + composition guidance
+          const prompt = buildBackdropPrompt(brief, visualAnchorText, market.founderProportionZone);
+          const png = await generateImage(prompt);
+          const bgPath = await saveFile(`projects/${projectId}/backdrops/${creativeId}.png`, png);
+          const artWithZone: ArtDirection = {
+            ...brief.artDirection,
+            founderZone: market.founderProportionZone,
+          };
+          await prisma.creative.update({
+            where: { id: creativeId },
+            data: {
+              bgImagePath: bgPath,
+              imagePrompt: prompt,
+              artDirection: JSON.stringify(clampArt(artWithZone, true)),
+            },
+          });
+        } catch (err) {
+          console.error("[pipeline] backdrop gen failed, using CSS background:", err);
+        }
+      }
+
+      const finalPng = await renderCreativePng(creativeId);
+      const finalPath = await saveFile(`projects/${projectId}/final/${creativeId}.png`, finalPng);
+      await prisma.creative.update({ where: { id: creativeId }, data: { finalPngPath: finalPath } });
+    }
+
+    // [8] Vision scoring
+    for (let i = 0; i < prepared.length; i++) {
+      const { creativeId } = prepared[i];
+      await setStatus(projectId, "scoring", `Scoring ${i + 1}/${prepared.length}`);
+      const c = await prisma.creative.findUnique({ where: { id: creativeId } });
+      if (!c?.finalPngPath) continue;
+      try {
+        const { readFile } = await import("@/lib/storage");
+        const buf = await readFile(c.finalPngPath);
+        const { score, overall } = await scoreCreative(buf.toString("base64"));
+        await prisma.creative.update({
+          where: { id: creativeId },
+          data: { score: JSON.stringify(score), overallScore: overall },
+        });
+      } catch (err) {
+        console.error("[pipeline] scoring failed:", err);
+      }
+    }
+
+    await setStatus(projectId, "done");
+  } catch (err) {
+    console.error("[pipeline] failed:", err);
+    await prisma.project.update({
+      where: { id: projectId },
+      data: { status: "error", error: err instanceof Error ? err.message : String(err) },
+    });
+  } finally {
+    await closeBrowser();
+  }
+}
