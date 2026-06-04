@@ -5,26 +5,14 @@ import { buildMarketProfile } from "./market";
 import { generateVisualAnchor } from "./visualAnchor";
 import { generateAnglePool, selectAngles } from "./angles";
 import { generateBriefs } from "./briefs";
-import { buildBackdropPrompt } from "./imagePrompt";
+import { buildFullAdPrompt } from "./imagePrompt";
 import { scoreCreative } from "./score";
-import { generateImage } from "@/lib/openai/client";
-import { renderCreativePng, closeBrowser } from "@/lib/export";
-import { saveFile } from "@/lib/storage";
-import { config } from "@/lib/env";
+import { generateImage, editImage } from "@/lib/openai/client";
+import { saveFile, readFile } from "@/lib/storage";
 import type { ArtDirection, CreativeBrief, EditableText } from "@/lib/types";
 
 async function setStatus(id: string, status: string, detail?: string) {
   await prisma.project.update({ where: { id }, data: { status, statusDetail: detail ?? null } });
-}
-
-function clampArt(art: ArtDirection, hasBackdrop: boolean): ArtDirection {
-  if (art.backgroundStyle === "photo-backdrop" && !hasBackdrop) {
-    return { ...art, backgroundStyle: "gradient" };
-  }
-  if (hasBackdrop) {
-    return { ...art, backgroundStyle: "photo-backdrop" };
-  }
-  return art;
 }
 
 function editableFromBrief(b: CreativeBrief): EditableText {
@@ -48,6 +36,9 @@ export async function runPipeline(projectId: string): Promise<void> {
     const hasPhotos = project.founderPhotos.some((p) => p.cutoutPath);
     const mode: "founder" | "banner" = project.featureFounder && hasPhotos ? "founder" : "banner";
     const cutouts = project.founderPhotos.map((p) => p.cutoutPath!).filter(Boolean);
+    // Original (un-processed) uploads — passed to the image-edit endpoint in founder mode
+    // so gpt-image integrates the real person itself (background removal included).
+    const originals = project.founderPhotos.map((p) => p.originalPath).filter(Boolean);
 
     // [1] Research — extract expert intelligence from website (content focus, not colors/fonts)
     await setStatus(projectId, "researching", project.websiteUrl ? "Reading website" : "Skipping (no URL)");
@@ -118,7 +109,7 @@ export async function runPipeline(projectId: string): Promise<void> {
       const angleRow = selectedRows[i] ?? selectedRows[0];
 
       // Inject founderZone from niche market research into the stored art direction.
-      // This controls how much of the canvas the founder occupies in the layout components.
+      // This controls how much of the canvas the founder occupies in the generated ad.
       const artWithZone: ArtDirection = {
         ...brief.artDirection,
         founderZone: market.founderProportionZone,
@@ -135,44 +126,42 @@ export async function runPipeline(projectId: string): Promise<void> {
           projectId, briefId: briefRow.id, index: i + 1, mode, layoutType: brief.layoutType,
           founderCutoutPath: mode === "founder" ? cutouts[i % cutouts.length] : null,
           editableText: JSON.stringify(editableFromBrief(brief)),
-          artDirection: JSON.stringify(clampArt(artWithZone, false)),
+          artDirection: JSON.stringify(artWithZone),
         },
       });
       prepared.push({ creativeId: creative.id, brief });
     }
 
-    // [7] Rendering — backdrop (founder only, with visual anchor + composition guidance) + Playwright PNG
+    // [7] Rendering — the image model generates the COMPLETE ad (imagery + all text) as one
+    // finished 1080×1080 PNG. The copy from the briefs pipeline is passed directly in the prompt.
+    // Founder mode: the real uploaded photo is passed to the edit endpoint so gpt-image integrates
+    // the actual person (it removes/replaces the original background itself). Banner mode: text-to-image.
     const visualAnchorText = anchor.modifier;
     for (let i = 0; i < prepared.length; i++) {
       const { creativeId, brief } = prepared[i];
       await setStatus(projectId, "rendering", `Rendering ${i + 1}/${prepared.length}`);
 
-      if (mode === "founder" && config.founderAiBackdrop) {
-        try {
-          // Backdrop prompt = visual anchor (brand-consistent) + scene + composition guidance
-          const prompt = buildBackdropPrompt(brief, visualAnchorText, market.founderProportionZone);
-          const png = await generateImage(prompt);
-          const bgPath = await saveFile(`projects/${projectId}/backdrops/${creativeId}.png`, png);
-          const artWithZone: ArtDirection = {
-            ...brief.artDirection,
-            founderZone: market.founderProportionZone,
-          };
-          await prisma.creative.update({
-            where: { id: creativeId },
-            data: {
-              bgImagePath: bgPath,
-              imagePrompt: prompt,
-              artDirection: JSON.stringify(clampArt(artWithZone, true)),
-            },
-          });
-        } catch (err) {
-          console.error("[pipeline] backdrop gen failed, using CSS background:", err);
-        }
-      }
+      try {
+        const prompt = buildFullAdPrompt(brief, visualAnchorText, market.founderProportionZone, mode);
 
-      const finalPng = await renderCreativePng(creativeId);
-      const finalPath = await saveFile(`projects/${projectId}/final/${creativeId}.png`, finalPng);
-      await prisma.creative.update({ where: { id: creativeId }, data: { finalPngPath: finalPath } });
+        let png: Buffer;
+        if (mode === "founder" && originals.length > 0) {
+          const refPath = originals[i % originals.length];
+          const bytes = await readFile(refPath);
+          const mime = refPath.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
+          png = await editImage(prompt, [{ bytes, mime }]);
+        } else {
+          png = await generateImage(prompt);
+        }
+
+        const finalPath = await saveFile(`projects/${projectId}/final/${creativeId}.png`, png);
+        await prisma.creative.update({
+          where: { id: creativeId },
+          data: { finalPngPath: finalPath, imagePrompt: prompt },
+        });
+      } catch (err) {
+        console.error("[pipeline] render failed:", err);
+      }
     }
 
     // [8] Vision scoring
@@ -182,7 +171,6 @@ export async function runPipeline(projectId: string): Promise<void> {
       const c = await prisma.creative.findUnique({ where: { id: creativeId } });
       if (!c?.finalPngPath) continue;
       try {
-        const { readFile } = await import("@/lib/storage");
         const buf = await readFile(c.finalPngPath);
         const { score, overall } = await scoreCreative(buf.toString("base64"));
         await prisma.creative.update({
@@ -201,7 +189,5 @@ export async function runPipeline(projectId: string): Promise<void> {
       where: { id: projectId },
       data: { status: "error", error: err instanceof Error ? err.message : String(err) },
     });
-  } finally {
-    await closeBrowser();
   }
 }

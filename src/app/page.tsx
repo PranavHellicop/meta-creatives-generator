@@ -1,14 +1,9 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { AppHeader } from "@/components/AppHeader";
+import { ProjectCard } from "@/components/ProjectCard";
 
 export const dynamic = "force-dynamic";
-
-const STATUS_LABEL: Record<string, string> = {
-  idle: "Draft",
-  done: "Complete",
-  error: "Error",
-};
 
 export default async function HomePage() {
   const projects = await prisma.project.findMany({
@@ -36,25 +31,17 @@ export default async function HomePage() {
             </Link>
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 auto-rows-fr">
             {projects.map((p) => (
-              <Link
+              <ProjectCard
                 key={p.id}
-                href={`/projects/${p.id}`}
-                className="rounded-xl border border-border bg-surface p-5 hover:border-accent/60 transition group"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs uppercase tracking-wide text-muted">{p.niche}</span>
-                  <span className="text-xs rounded-full bg-surface-2 px-2 py-0.5 text-muted">
-                    {STATUS_LABEL[p.status] ?? p.status}
-                  </span>
-                </div>
-                <h2 className="font-semibold group-hover:text-accent transition">{p.name}</h2>
-                <p className="text-sm text-muted mt-1 line-clamp-2">{p.service}</p>
-                <p className="text-xs text-muted mt-3">
-                  {p._count.creatives} creative{p._count.creatives === 1 ? "" : "s"}
-                </p>
-              </Link>
+                id={p.id}
+                name={p.name}
+                niche={p.niche}
+                service={p.service}
+                status={p.status}
+                creativeCount={p._count.creatives}
+              />
             ))}
           </div>
         )}

@@ -1,10 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { EditableText, Score } from "@/lib/types";
-
-const inputCls =
-  "w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm outline-none focus:border-accent transition";
 
 const SCORE_LABELS: { key: keyof Score; label: string }[] = [
   { key: "readability", label: "Readability" },
@@ -32,55 +29,74 @@ export function CreativeEditor({
   meta: { index: number; angle: string | null; layoutType: string; mode: string; overallScore: number | null };
   score: Score | null;
 }) {
-  const [text, setText] = useState<EditableText>(initialText);
-  const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
-  const [previewKey, setPreviewKey] = useState(0);
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(initialPngUrl);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const downloadUrl = initialPngUrl;
+  const [exporting, setExporting] = useState(false);
+  const [canvaError, setCanvaError] = useState<string | null>(null);
 
-  const field = (k: keyof EditableText) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    setText((t) => ({ ...t, [k]: e.target.value }));
-    setDirty(true);
-  };
+  // Upload the PNG to Canva and open the editable design. If Canva isn't connected
+  // yet, bounce through OAuth (returning here afterwards). `sameTab` is used for the
+  // post-OAuth auto-continue, since a new-tab popup would be blocked without a click.
+  const exportToCanva = useCallback(
+    async (sameTab = false) => {
+      setExporting(true);
+      setCanvaError(null);
+      try {
+        const res = await fetch(`/api/creatives/${cid}/export-canva`, { method: "POST" });
+        const json = await res.json();
+        if (json.needsAuth) {
+          window.location.href = `/api/canva/authorize?returnTo=${encodeURIComponent(window.location.pathname)}`;
+          return;
+        }
+        if (json.editUrl) {
+          if (sameTab) window.location.href = json.editUrl;
+          else window.open(json.editUrl, "_blank", "noopener");
+        } else {
+          setCanvaError(json.error || "Export to Canva failed.");
+        }
+      } catch {
+        setCanvaError("Export to Canva failed.");
+      } finally {
+        setExporting(false);
+      }
+    },
+    [cid]
+  );
 
-  // Save text → re-render the preview iframe instantly (no image-API call) → re-export PNG.
-  async function apply() {
-    setSaving(true);
-    try {
-      await fetch(`/api/creatives/${cid}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(text),
-      });
-      setPreviewKey((k) => k + 1); // reload iframe to show new text
-      const res = await fetch(`/api/creatives/${cid}/reexport`, { method: "POST" });
-      const json = await res.json();
-      if (json.url) setDownloadUrl(json.url);
-      setDirty(false);
-    } finally {
-      setSaving(false);
-    }
-  }
+  // After returning from Canva OAuth, auto-continue the export (or surface an error).
+  // Deferred via a timer so we don't update state synchronously inside the effect.
+  useEffect(() => {
+    const status = new URLSearchParams(window.location.search).get("canva");
+    if (!status) return;
+    window.history.replaceState({}, "", window.location.pathname); // strip the flag
+    const t = setTimeout(() => {
+      if (status === "connected") exportToCanva(true);
+      else if (status === "error") setCanvaError("Canva connection failed. Please try again.");
+    }, 0);
+    return () => clearTimeout(t);
+  }, [exportToCanva]);
 
   return (
     <div className="grid lg:grid-cols-[480px_1fr] gap-8 mt-4">
-      {/* Live preview — the exact /render output scaled to fit */}
+      {/* The generated final PNG — imagery and all text are baked into this single image */}
       <div>
         <div
           className="rounded-xl border border-border overflow-hidden bg-white"
           style={{ width: 480, height: 480 }}
         >
-          <iframe
-            key={previewKey}
-            ref={iframeRef}
-            src={`/render/${cid}`}
-            title="preview"
-            scrolling="no"
-            style={{ width: 1080, height: 1080, border: 0, transform: "scale(0.4444)", transformOrigin: "top left" }}
-          />
+          {downloadUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={downloadUrl}
+              alt="creative"
+              width={480}
+              height={480}
+              style={{ width: 480, height: 480, objectFit: "cover" }}
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-muted">No image yet</div>
+          )}
         </div>
-        <div className="flex gap-2 mt-3">
+        <div className="flex flex-wrap gap-2 mt-3">
           <a
             href={downloadUrl ?? "#"}
             download
@@ -88,52 +104,40 @@ export function CreativeEditor({
           >
             ↓ Download PNG
           </a>
-          <span className="text-xs text-muted self-center">
-            {dirty ? "Unsaved changes" : "Preview matches export"}
-          </span>
+          <button
+            onClick={() => exportToCanva()}
+            disabled={!downloadUrl || exporting}
+            className={`text-sm rounded-lg bg-accent px-4 py-2 text-white ${!downloadUrl || exporting ? "opacity-40" : "hover:opacity-90"}`}
+          >
+            {exporting ? "Exporting…" : "Export to Canva"}
+          </button>
         </div>
+        <p className="text-xs text-muted mt-2">
+          Opens the ad in Canva. Use Canva&apos;s <span className="font-medium">Grab Text</span> to make the copy editable.
+        </p>
+        {canvaError && <p className="text-xs text-red-500 mt-1">{canvaError}</p>}
       </div>
 
-      {/* Editable text + meta + score */}
+      {/* Copy reference (baked into the image) + meta + score */}
       <div className="space-y-5">
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted">
-            <span>#{meta.index}</span>
-            <span>· {meta.angle ?? meta.mode}</span>
-            <span>· {meta.layoutType}</span>
-            {meta.overallScore != null && (
-              <span className="ml-auto text-accent font-semibold normal-case text-sm">Score {meta.overallScore}/10</span>
-            )}
-          </div>
+        <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted">
+          <span>#{meta.index}</span>
+          <span>· {meta.angle ?? meta.mode}</span>
+          <span>· {meta.layoutType}</span>
+          {meta.overallScore != null && (
+            <span className="ml-auto text-accent font-semibold normal-case text-sm">Score {meta.overallScore}/10</span>
+          )}
         </div>
 
         <div className="space-y-3">
-          <Labeled label="Headline">
-            <input className={inputCls} value={text.headline} onChange={field("headline")} />
-          </Labeled>
-          <Labeled label="Subheadline">
-            <input className={inputCls} value={text.subheadline} onChange={field("subheadline")} />
-          </Labeled>
-          <Labeled label="Supporting copy">
-            <input className={inputCls} value={text.supportingCopy} onChange={field("supportingCopy")} />
-          </Labeled>
+          <Field label="Headline" value={initialText.headline} />
+          <Field label="Subheadline" value={initialText.subheadline} />
+          <Field label="Supporting copy" value={initialText.supportingCopy} />
           <div className="grid grid-cols-2 gap-3">
-            <Labeled label="Offer">
-              <input className={inputCls} value={text.offer} onChange={field("offer")} />
-            </Labeled>
-            <Labeled label="CTA">
-              <input className={inputCls} value={text.cta} onChange={field("cta")} />
-            </Labeled>
+            <Field label="Offer" value={initialText.offer} />
+            <Field label="CTA" value={initialText.cta} />
           </div>
         </div>
-
-        <button
-          onClick={apply}
-          disabled={saving || !dirty}
-          className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white disabled:opacity-40 hover:opacity-90"
-        >
-          {saving ? "Re-rendering…" : "Apply & re-export"}
-        </button>
 
         {score && (
           <div className="rounded-xl border border-border bg-surface p-5">
@@ -154,11 +158,13 @@ export function CreativeEditor({
   );
 }
 
-function Labeled({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <label className="block text-sm font-medium mb-1.5">{label}</label>
-      {children}
+      <div className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-muted">
+        {value || "—"}
+      </div>
     </div>
   );
 }

@@ -26,8 +26,8 @@ body {
   color: var(--foreground);
 }
 
-/* The /render route paints a pure isolated canvas for screenshotting. */
-.render-isolate {
-  margin: 0;
-  padding: 0;
+/* Tailwind v4's preflight sets buttons to `cursor: default`; restore the pointer. */
+button:not(:disabled),
+[role="button"]:not(:disabled) {
+  cursor: pointer;
 }

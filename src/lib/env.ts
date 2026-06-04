@@ -14,9 +14,21 @@ export const config = {
   imageModel: process.env.IMAGE_MODEL || "gpt-image-1",
   imageQuality: (process.env.IMAGE_QUALITY || "low") as "low" | "medium" | "high",
   dataDir: process.env.DATA_DIR || "data",
-  // Base URL the server uses to reach its own /render route for Playwright export.
   appUrl: process.env.APP_URL || "http://localhost:3000",
-  // Founder mode: generate an AI photo backdrop behind the cutout (premium environments).
-  // Default on. Set FOUNDER_AI_BACKDROP=false to use clean CSS brand-color backgrounds instead.
-  founderAiBackdrop: process.env.FOUNDER_AI_BACKDROP !== "false",
+
+  // Canva Connect API ("Export to Canva"). Optional — the feature is hidden if unset.
+  canva: {
+    get configured() {
+      return Boolean(process.env.CANVA_CLIENT_ID && process.env.CANVA_CLIENT_SECRET);
+    },
+    get clientId() {
+      return required("CANVA_CLIENT_ID");
+    },
+    get clientSecret() {
+      return required("CANVA_CLIENT_SECRET");
+    },
+    redirectUri:
+      process.env.CANVA_REDIRECT_URI ||
+      `${process.env.APP_URL || "http://localhost:3000"}/api/canva/callback`,
+  },
 };

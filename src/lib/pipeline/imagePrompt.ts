@@ -1,34 +1,56 @@
 import type { CreativeBrief, LayoutType } from "@/lib/types";
 import { founderSideFromLayout } from "@/lib/types";
 
-// The image model renders backdrop/environment ONLY — never text, never people.
-// The visual anchor (generated once per project) is prepended to every call to keep
-// the batch visually cohesive. Composition guidance tells the model exactly where to
-// leave open negative space for the founder cutout.
-export function buildBackdropPrompt(
+// The image model renders the COMPLETE ad — backdrop, layout, and all text — as
+// a single finished 1080×1080 image. The copy (headline, sub, CTA, offer) from
+// the research pipeline is passed directly; the model decides placement and style.
+// The generated PNG is the final output.
+export function buildFullAdPrompt(
   brief: CreativeBrief,
   visualAnchor: string,
-  founderProportionZone: number
+  founderProportionZone: number,
+  mode: "founder" | "banner"
 ): string {
   const layoutType = brief.layoutType as LayoutType;
   const side = founderSideFromLayout(layoutType);
   const pct = Math.round(founderProportionZone * 100);
 
-  const compositionGuide =
-    side === "center"
-      ? `Compose with the central ${pct}% of the frame naturally open and softly out of focus, with visual interest framing the left and right edges, leaving the centre clear for a subject standing in front.`
-      : `Compose so the ${side === "right" ? "right" : "left"} ${pct}% of the frame is intentionally open, uncluttered, and in soft focus — this area will be occupied by a person in post-production. Place any environmental interest and depth on the ${side === "right" ? "left" : "right"} side.`;
+  const personInstruction =
+    mode === "founder"
+      ? side === "center"
+        ? `Use the REAL PERSON from the provided reference photograph as the expert/founder. Preserve their actual face, identity, and likeness exactly. Remove/replace their original background and integrate them naturally into the scene, occupying the central ${pct}% of the frame as a professional half-body portrait with consistent lighting.`
+        : `Use the REAL PERSON from the provided reference photograph as the expert/founder. Preserve their actual face, identity, and likeness exactly. Remove/replace their original background and place them as a confident professional portrait on the ${side} ${pct}% of the frame, with lighting that matches the scene.`
+      : `No people. This is a direct-response banner ad using bold typography, shapes, and graphic design elements.`;
 
-  return [
-    // Visual anchor locked per brand — maintains campaign consistency across all backdrops
+  const textZone =
+    mode === "founder"
+      ? side === "center"
+        ? `Place all text in clearly readable zones — headline and brand at the top third, CTA and offer at the bottom third. Ensure the text never overlaps the person.`
+        : `Place all text on the ${side === "right" ? "left" : "right"} side of the image, clearly separated from the person.`
+      : `Use a clean layout with the headline dominating the upper half and the CTA prominent at the bottom.`;
+
+  const lines = [
+    `Create a complete, professional Meta ad creative (1080×1080 pixels, square format).`,
     visualAnchor,
-    // Scene-specific details from this creative's brief
-    `Setting: ${brief.visualConcept}.`,
-    // Composition instruction based on layout + niche proportion
-    compositionGuide,
-    // Hard constraints — no text, no people, no garbled content
-    `Absolutely NO text, NO words, NO letters, NO numbers, NO signage, NO posters, NO screens, NO logos, NO watermarks anywhere in the image.`,
-    `NO people, NO faces, NO human figures, NO mannequins, NO silhouettes.`,
-    `Photorealistic, editorial commercial quality.`,
-  ].join(" ");
+    `Scene/backdrop: ${brief.visualConcept}.`,
+    personInstruction,
+    textZone,
+    ``,
+    `EXACT TEXT TO RENDER ON THE AD:`,
+    `• Headline (large, bold, most prominent element): "${brief.headline}"`,
+    `• Subheadline (secondary, smaller): "${brief.subheadline}"`,
+    brief.supportingCopy ? `• Supporting copy (body text, smallest): "${brief.supportingCopy}"` : "",
+    brief.offer ? `• Offer callout (highlighted, eye-catching): "${brief.offer}"` : "",
+    `• CTA button (bold, high-contrast button): "${brief.cta}"`,
+    ``,
+    `DESIGN SPECS:`,
+    `• Typography style: ${brief.artDirection.typographyStyle}`,
+    `• Primary color: ${brief.artDirection.primaryColor}`,
+    `• Accent/CTA color: ${brief.artDirection.accentColor}`,
+    `• Mood: ${brief.artDirection.mood}`,
+    `• All text must be crisp, perfectly legible, and professionally typeset — no handwriting, no distortion.`,
+    `• High-end commercial advertising quality. Agency-standard layout. Print-ready sharpness.`,
+  ].filter(Boolean);
+
+  return lines.join(" ");
 }

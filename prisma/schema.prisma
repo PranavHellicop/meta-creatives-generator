@@ -118,3 +118,15 @@ model Creative {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
+
+// Canva Connect OAuth tokens. This is a single-user local app, so there is exactly
+// one row (id = "canva"); we upsert it on connect and refresh.
+model CanvaAuth {
+  id           String   @id @default("canva")
+  accessToken  String
+  refreshToken String
+  expiresAt    DateTime // when the access token expires
+  scope        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}

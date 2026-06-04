@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// ---- Layout library identifiers (must match components in src/components/layouts) ----
+// ---- Layout identifiers — picked per brief; guide the founder's placement in the generated ad ----
 export const LAYOUT_TYPES = [
   "FounderRight",
   "FounderLeft",
@@ -173,20 +173,8 @@ export const ScoreSchema = z.object({
 });
 export type Score = z.infer<typeof ScoreSchema>;
 
-// Props consumed by every layout component + the renderer.
-export interface CreativeRenderProps {
-  layoutType: LayoutType;
-  mode: "founder" | "banner";
-  text: EditableText;
-  art: ArtDirection;
-  founderCutoutUrl?: string;
-  bgImageUrl?: string;
-  trustElements: string[];
-  socialProofElements: string[];
-  brandName: string;
-}
-
-// Which side the founder appears on for a given layout — used to guide backdrop composition.
+// Which side the founder appears on for a given layout — used to guide the founder's
+// placement in the generated ad.
 export function founderSideFromLayout(layoutType: LayoutType): "left" | "right" | "center" {
   if (["FounderLeft"].includes(layoutType)) return "left";
   if (["CenteredPortrait"].includes(layoutType)) return "center";

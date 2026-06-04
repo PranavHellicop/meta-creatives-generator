@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import OpenAI, { toFile } from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
 import type { z } from "zod";
 import { config } from "@/lib/env";
@@ -56,6 +56,42 @@ export async function generateImage(prompt: string): Promise<Buffer> {
   const res = await client().images.generate(params as never);
   const b64 = res.data?.[0]?.b64_json;
   if (!b64) throw new Error("Image model returned no image data");
+  return Buffer.from(b64, "base64");
+}
+
+/**
+ * Edit/compose an image from one or more reference images + a prompt.
+ * Used in founder mode: the real uploaded founder photo(s) are passed so the
+ * image model integrates the actual person (and removes/replaces their background itself)
+ * rather than inventing a fictional one. Requires a gpt-image-* model (dall-e-2 edit needs a mask).
+ * Returns raw PNG bytes.
+ */
+export async function editImage(
+  prompt: string,
+  references: { bytes: Buffer; mime: string }[]
+): Promise<Buffer> {
+  const model = config.imageModel;
+  const files = await Promise.all(
+    references.map((r, i) =>
+      toFile(r.bytes, `founder-${i}.${r.mime === "image/png" ? "png" : "jpg"}`, { type: r.mime })
+    )
+  );
+
+  const params: Record<string, unknown> = {
+    model,
+    prompt,
+    // gpt-image models accept an array of reference images; single image also fine.
+    image: files.length === 1 ? files[0] : files,
+    size: "1024x1024",
+    n: 1,
+  };
+  if (model.startsWith("gpt-image")) {
+    params.quality = config.imageQuality;
+  }
+
+  const res = await client().images.edit(params as never);
+  const b64 = res.data?.[0]?.b64_json;
+  if (!b64) throw new Error("Image edit returned no image data");
   return Buffer.from(b64, "base64");
 }
 

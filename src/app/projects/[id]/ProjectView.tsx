@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 const STAGES = [
   { key: "researching", label: "Researching the business" },
@@ -44,6 +45,20 @@ export function ProjectView({
   initialNiche: string;
 }) {
   const [data, setData] = useState<Status | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const router = useRouter();
+
+  async function handleDelete() {
+    if (!confirm(`Delete "${initialName}"? This permanently removes the project and its creatives.`)) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, { method: "DELETE" });
+      if (res.ok) router.push("/");
+      else setDeleting(false);
+    } catch {
+      setDeleting(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -81,11 +96,20 @@ export function ProjectView({
           <span className="text-xs uppercase tracking-wide text-muted">{initialNiche}</span>
           <h1 className="text-2xl font-semibold">{initialName}</h1>
         </div>
-        {done && (
-          <span className="text-sm rounded-full bg-green-500/15 text-green-400 px-3 py-1">
-            {data?.creatives.length} creatives ready
-          </span>
-        )}
+        <div className="flex items-center gap-3">
+          {done && (
+            <span className="text-sm rounded-full bg-green-500/15 text-green-400 px-3 py-1">
+              {data?.creatives.length} creatives ready
+            </span>
+          )}
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="text-sm rounded-lg border border-border px-3 py-1.5 text-muted hover:border-red-500/60 hover:text-red-500 disabled:opacity-40 transition"
+          >
+            {deleting ? "Deleting…" : "Delete"}
+          </button>
+        </div>
       </div>
 
       {errored && (
