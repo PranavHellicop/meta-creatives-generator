@@ -34,6 +34,9 @@ model Project {
 
   rawResearch     String?          // raw scraped website text (truncated)
   visualAnchor    String?          // locked 50-75 word image generation modifier for this brand
+  providedHeadlines String?        // JSON array of user-supplied headlines (used in order, AI fills the rest)
+  providedCtas      String?        // JSON array of user-supplied CTAs (comma-separated in the form)
+  referenceDigest String?          // structure/placement patterns learned from the data/references swipe folder (if any)
   businessProfile BusinessProfile?
   marketProfile   MarketProfile?
   founderPhotos   FounderPhoto[]

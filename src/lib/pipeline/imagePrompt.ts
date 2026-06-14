@@ -9,11 +9,22 @@ export function buildFullAdPrompt(
   brief: CreativeBrief,
   visualAnchor: string,
   founderProportionZone: number,
-  mode: "founder" | "banner"
+  mode: "founder" | "banner",
+  ctas?: string[],
+  referenceGuidance?: string
 ): string {
   const layoutType = brief.layoutType as LayoutType;
   const side = founderSideFromLayout(layoutType);
   const pct = Math.round(founderProportionZone * 100);
+
+  // CTA(s) to render: explicit override list if provided, else the brief's single CTA.
+  const ctaList = ctas && ctas.length ? ctas : [brief.cta];
+  const ctaLine =
+    ctaList.length === 1
+      ? `• CTA button (bold, high-contrast button): "${ctaList[0]}"`
+      : `• CTA elements — feature ALL of these as distinct, prominent call-to-action elements (e.g. a primary CTA button plus a secondary button or lead-in line), each crisp and clearly legible: ${ctaList
+          .map((c) => `"${c}"`)
+          .join(" and ")}`;
 
   const personInstruction =
     mode === "founder"
@@ -35,13 +46,16 @@ export function buildFullAdPrompt(
     `Scene/backdrop: ${brief.visualConcept}.`,
     personInstruction,
     textZone,
+    referenceGuidance
+      ? `Follow these proven structural/placement patterns for this niche (structure ONLY — do not copy any words or imagery from the references): ${referenceGuidance.replace(/\n/g, " ")}`
+      : "",
     ``,
     `EXACT TEXT TO RENDER ON THE AD:`,
     `• Headline (large, bold, most prominent element): "${brief.headline}"`,
     `• Subheadline (secondary, smaller): "${brief.subheadline}"`,
     brief.supportingCopy ? `• Supporting copy (body text, smallest): "${brief.supportingCopy}"` : "",
     brief.offer ? `• Offer callout (highlighted, eye-catching): "${brief.offer}"` : "",
-    `• CTA button (bold, high-contrast button): "${brief.cta}"`,
+    ctaLine,
     ``,
     `DESIGN SPECS:`,
     `• Typography style: ${brief.artDirection.typographyStyle}`,

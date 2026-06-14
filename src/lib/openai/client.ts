@@ -98,6 +98,41 @@ export async function editImage(
 /**
  * Vision scoring of a finished creative PNG. Returns a typed score object.
  */
+/**
+ * Multi-image vision completion: feed several reference images plus a prompt and
+ * get back a typed object. Used to distill structural/layout patterns from a
+ * folder of example ad creatives.
+ */
+export async function analyzeImages<T>(opts: {
+  system: string;
+  user: string;
+  images: { base64: string; mime: string }[];
+  schema: z.ZodType<T>;
+  schemaName: string;
+}): Promise<T> {
+  const res = await client().beta.chat.completions.parse({
+    model: config.reasoningModel,
+    temperature: 0.3,
+    messages: [
+      { role: "system", content: opts.system },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: opts.user },
+          ...opts.images.map((img) => ({
+            type: "image_url" as const,
+            image_url: { url: `data:${img.mime};base64,${img.base64}` },
+          })),
+        ],
+      },
+    ],
+    response_format: zodResponseFormat(opts.schema, opts.schemaName),
+  });
+  const parsed = res.choices[0]?.message?.parsed;
+  if (!parsed) throw new Error("OpenAI returned no parsed analysis");
+  return parsed;
+}
+
 export async function scoreImage<T>(opts: {
   system: string;
   user: string;

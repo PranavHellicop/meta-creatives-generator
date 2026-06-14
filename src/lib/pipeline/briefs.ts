@@ -13,11 +13,16 @@ import {
 
 const BriefBatchSchema = z.object({ briefs: z.array(CreativeBriefSchema) });
 
+// Per-angle copy the user supplied that must be honored (aligned by index to `angles`).
+export type CopyOverride = { headline?: string; ctas?: string[] };
+
 export async function generateBriefs(
   angles: Angle[],
   mode: "founder" | "banner",
   profile: BusinessProfile,
-  market: MarketProfile
+  market: MarketProfile,
+  copyOverrides?: CopyOverride[],
+  referenceGuidance?: string
 ): Promise<CreativeBrief[]> {
   const allowed = mode === "founder" ? FOUNDER_LAYOUTS : BANNER_LAYOUTS;
 
@@ -33,7 +38,8 @@ CRITICAL RULES:
       : "NO people. Direct-response banner ads using typography, shapes, icons, stats, offer blocks."}
 - layoutType MUST be one of: ${allowed.join(", ")}.
 - MAXIMIZE diversity across the set: vary layoutType, headline structure, emotion, and color emphasis. Avoid two similar creatives.
-- Keep colors on-brand using the brand palette, but vary which color leads each creative.`;
+- Keep colors on-brand using the brand palette, but vary which color leads each creative.
+- Some angles below specify a REQUIRED HEADLINE and/or REQUIRED CTA(s). For those, you MUST use that exact text verbatim as the headline/cta, and write the subheadline + supporting copy to fit and support it. For angles with no requirement, write your own headline/CTA per the rules above.`;
 
   const user = `BRAND: ${profile.brandName} — ${profile.service}
 OFFER: ${profile.offer}
@@ -55,8 +61,28 @@ Typography that wins in this niche: ${market.typographyRecommendation}
 Photography direction: ${market.photographyDirection}
 
 ANGLES (write one brief per angle, in this exact order):
-${angles.map((a, i) => `${i + 1}. [${a.type}] ${a.hook} — ${a.rationale}`).join("\n")}
+${angles
+    .map((a, i) => {
+      let line = `${i + 1}. [${a.type}] ${a.hook} — ${a.rationale}`;
+      const ov = copyOverrides?.[i];
+      if (ov?.headline) {
+        line += `\n   REQUIRED HEADLINE (use this exact text, verbatim, as the headline): "${ov.headline}"`;
+      }
+      if (ov?.ctas?.length) {
+        line +=
+          ov.ctas.length === 1
+            ? `\n   REQUIRED CTA (use this exact text, verbatim): "${ov.ctas[0]}"`
+            : `\n   REQUIRED CTAs (feature ALL of these verbatim as call-to-action elements): ${ov.ctas
+                .map((c) => `"${c}"`)
+                .join(" and ")}`;
+      }
+      return line;
+    })
+    .join("\n")}
 
+${referenceGuidance
+      ? `\nREFERENCE LAYOUT PATTERNS (learned from example creatives in this niche — apply the STRUCTURE & PLACEMENT only; do NOT copy any words, brands, or imagery from them):\n${referenceGuidance}\n`
+      : ""}
 Produce exactly ${angles.length} briefs in the same order. Use only allowed layouts: ${allowed.join(", ")}.
 Choose typographyStyle based on the niche recommendation above.`;
 

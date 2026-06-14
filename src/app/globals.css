@@ -21,6 +21,12 @@
   --font-sans: var(--font-geist-sans);
 }
 
+/* Always reserve the vertical scrollbar's space so centered (mx-auto) layouts
+   don't jump sideways when content grows tall enough to need a scrollbar. */
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

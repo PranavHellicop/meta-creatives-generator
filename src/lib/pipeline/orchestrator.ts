@@ -9,6 +9,9 @@ import { buildFullAdPrompt } from "./imagePrompt";
 import { scoreCreative } from "./score";
 import { generateImage, editImage } from "@/lib/openai/client";
 import { saveFile, readFile } from "@/lib/storage";
+import { buildCtaVariants } from "@/lib/copyInput";
+import { assessCtaCombinable } from "./ctaStrategy";
+import { buildReferenceGuidance } from "./references";
 import type { ArtDirection, CreativeBrief, EditableText } from "@/lib/types";
 
 async function setStatus(id: string, status: string, detail?: string) {
@@ -40,6 +43,18 @@ export async function runPipeline(projectId: string): Promise<void> {
     // so gpt-image integrates the real person itself (background removal included).
     const originals = project.founderPhotos.map((p) => p.originalPath).filter(Boolean);
 
+    // User-provided copy. Headlines are assigned to ads in order (AI fills any gap).
+    // CTA variants are cycled across ads: each single CTA, plus the all-combined variant.
+    const providedHeadlines: string[] = project.providedHeadlines ? JSON.parse(project.providedHeadlines) : [];
+    const providedCtas: string[] = project.providedCtas ? JSON.parse(project.providedCtas) : [];
+    // Only pair multiple CTAs on one ad when the LLM judges them distinct &
+    // complementary; synonymous CTAs stay on separate ads (no redundant combo).
+    const ctasCombinable = await assessCtaCombinable(providedCtas);
+    const ctaVariants = buildCtaVariants(providedCtas, ctasCombinable);
+    const headlineFor = (i: number): string | undefined => providedHeadlines[i];
+    const ctasFor = (i: number): string[] | undefined =>
+      ctaVariants.length ? ctaVariants[i % ctaVariants.length] : undefined;
+
     // [1] Research — extract expert intelligence from website (content focus, not colors/fonts)
     await setStatus(projectId, "researching", project.websiteUrl ? "Reading website" : "Skipping (no URL)");
     const research = await researchWebsite(project.websiteUrl);
@@ -70,6 +85,15 @@ export async function runPipeline(projectId: string): Promise<void> {
     const anchor = await generateVisualAnchor(profile, market);
     await prisma.project.update({ where: { id: projectId }, data: { visualAnchor: anchor.modifier } });
 
+    // [3.6] Reference swipe file — if the user dropped example creatives into
+    // data/references/<niche|service>/, learn their structure & placement (only).
+    // Empty/missing folder → "" and everything proceeds exactly as before.
+    const referenceGuidance = await buildReferenceGuidance(project.niche, project.service);
+    if (referenceGuidance) {
+      await setStatus(projectId, "anchoring", "Studying reference creatives");
+      await prisma.project.update({ where: { id: projectId }, data: { referenceDigest: referenceGuidance } });
+    }
+
     // [4] Angles — generate pool (3× needed), select strongest with type diversity
     await setStatus(projectId, "angles", "Generating angle pool");
     const pool = await generateAnglePool(project.creativeCount, profile, market);
@@ -89,11 +113,13 @@ export async function runPipeline(projectId: string): Promise<void> {
     );
     const selectedRows = angleRows.filter((r) => r.selected).slice(0, project.creativeCount);
 
-    // [5] Briefs — full creative brief + art direction per angle (with market intelligence context)
+    // [5] Briefs — full creative brief + art direction per angle (with market intelligence context).
+    // Feed any user-provided headlines/CTAs so the LLM writes coherent copy around them.
     await setStatus(projectId, "briefs", `Writing ${selectedRows.length} briefs`);
+    const copyOverrides = selectedRows.map((_, i) => ({ headline: headlineFor(i), ctas: ctasFor(i) }));
     const briefs = await generateBriefs(
       selectedRows.map((r) => ({ type: r.type as never, hook: r.hook, rationale: r.rationale })),
-      mode, profile, market
+      mode, profile, market, copyOverrides, referenceGuidance
     );
 
     // [6] Art direction — save briefs + creatives. Inject founderZone from market profile into art direction.
@@ -107,6 +133,12 @@ export async function runPipeline(projectId: string): Promise<void> {
     for (let i = 0; i < briefs.length; i++) {
       const brief = briefs[i];
       const angleRow = selectedRows[i] ?? selectedRows[0];
+
+      // Enforce user-provided copy verbatim (the LLM was asked to use it, but we guarantee it).
+      const assignedHeadline = headlineFor(i);
+      const assignedCtas = ctasFor(i);
+      if (assignedHeadline) brief.headline = assignedHeadline;
+      if (assignedCtas) brief.cta = assignedCtas.join("  +  ");
 
       // Inject founderZone from niche market research into the stored art direction.
       // This controls how much of the canvas the founder occupies in the generated ad.
@@ -142,7 +174,7 @@ export async function runPipeline(projectId: string): Promise<void> {
       await setStatus(projectId, "rendering", `Rendering ${i + 1}/${prepared.length}`);
 
       try {
-        const prompt = buildFullAdPrompt(brief, visualAnchorText, market.founderProportionZone, mode);
+        const prompt = buildFullAdPrompt(brief, visualAnchorText, market.founderProportionZone, mode, ctasFor(i), referenceGuidance);
 
         let png: Buffer;
         if (mode === "founder" && originals.length > 0) {
