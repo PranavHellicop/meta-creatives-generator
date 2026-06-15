@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Pagination } from "@/components/Pagination";
+
+const CREATIVES_PER_PAGE = 12; // pagination only kicks in past a full batch
 
 const STAGES = [
   { key: "researching", label: "Researching the business" },
@@ -46,6 +49,7 @@ export function ProjectView({
 }) {
   const [data, setData] = useState<Status | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [page, setPage] = useState(1);
   const router = useRouter();
 
   async function handleDelete() {
@@ -150,40 +154,49 @@ export function ProjectView({
         </div>
       )}
 
-      {data && data.creatives.length > 0 && (
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {data.creatives.map((c) => (
-            <Link
-              key={c.id}
-              href={`/projects/${projectId}/creatives/${c.id}`}
-              className="rounded-xl border border-border bg-surface overflow-hidden hover:border-accent/60 transition group"
-            >
-              <div className="aspect-square bg-surface-2">
-                {c.finalUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={c.finalUrl} alt={c.text.headline} className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-muted text-xs animate-pulse">
-                    rendering…
+      {data && data.creatives.length > 0 && (() => {
+        const totalPages = Math.max(1, Math.ceil(data.creatives.length / CREATIVES_PER_PAGE));
+        const current = Math.min(page, totalPages); // clamp if the list shrank
+        const start = (current - 1) * CREATIVES_PER_PAGE;
+        const shown = data.creatives.slice(start, start + CREATIVES_PER_PAGE);
+        return (
+          <>
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {shown.map((c) => (
+                <Link
+                  key={c.id}
+                  href={`/projects/${projectId}/creatives/${c.id}`}
+                  className="rounded-xl border border-border bg-surface overflow-hidden hover:border-accent/60 transition group"
+                >
+                  <div className="aspect-square bg-surface-2">
+                    {c.finalUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={c.finalUrl} alt={c.text.headline} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-muted text-xs animate-pulse">
+                        rendering…
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-              <div className="p-4">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs uppercase tracking-wide text-muted">
-                    #{c.index} · {c.angleType ?? c.mode}
-                  </span>
-                  {c.overallScore != null && (
-                    <span className="text-xs font-semibold text-accent">{c.overallScore.toFixed(1)}</span>
-                  )}
-                </div>
-                <p className="font-medium text-sm line-clamp-1">{c.text.headline}</p>
-                <p className="text-xs text-muted line-clamp-1">{c.text.offer}</p>
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
+                  <div className="p-4">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs uppercase tracking-wide text-muted">
+                        #{c.index} · {c.angleType ?? c.mode}
+                      </span>
+                      {c.overallScore != null && (
+                        <span className="text-xs font-semibold text-accent">{c.overallScore.toFixed(1)}</span>
+                      )}
+                    </div>
+                    <p className="font-medium text-sm line-clamp-1">{c.text.headline}</p>
+                    <p className="text-xs text-muted line-clamp-1">{c.text.offer}</p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+            <Pagination page={current} totalPages={totalPages} onChange={setPage} />
+          </>
+        );
+      })()}
     </div>
   );
 }

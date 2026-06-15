@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { AppHeader } from "@/components/AppHeader";
-import { ProjectCard } from "@/components/ProjectCard";
+import { ProjectGrid } from "@/components/ProjectGrid";
 
 export const dynamic = "force-dynamic";
 
@@ -31,19 +31,16 @@ export default async function HomePage() {
             </Link>
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 auto-rows-fr">
-            {projects.map((p) => (
-              <ProjectCard
-                key={p.id}
-                id={p.id}
-                name={p.name}
-                niche={p.niche}
-                service={p.service}
-                status={p.status}
-                creativeCount={p._count.creatives}
-              />
-            ))}
-          </div>
+          <ProjectGrid
+            projects={projects.map((p) => ({
+              id: p.id,
+              name: p.name,
+              niche: p.niche,
+              service: p.service,
+              status: p.status,
+              creativeCount: p._count.creatives,
+            }))}
+          />
         )}
       </main>
     </>

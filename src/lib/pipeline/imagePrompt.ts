@@ -68,3 +68,16 @@ export function buildFullAdPrompt(
 
   return lines.join(" ");
 }
+
+// Tier-1 edit: re-feed a finished creative to the image edit endpoint and apply a
+// SINGLE change while preserving everything else. Validated by spike — even a
+// full headline rewrite preserves the rest of the ad with no mask.
+export function buildEditPrompt(instruction: string): string {
+  return [
+    `Here is a finished, complete 1080×1080 square Meta ad creative.`,
+    `Make ONLY this single change: ${instruction}`,
+    `Keep EVERYTHING else pixel-for-pixel identical — the same layout, composition, fonts, font sizes and weights, colors, every photo and graphic, all badges, the offer, the CTA, the feature icons, and all other text.`,
+    `Do not move, recolor, restyle, crop, or re-render any element other than the one specified. Match the existing typography and positioning of the changed element.`,
+    `All text must remain crisp, perfectly legible, and professionally typeset.`,
+  ].join(" ");
+}

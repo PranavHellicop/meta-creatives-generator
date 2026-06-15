@@ -118,8 +118,30 @@ model Creative {
   score        String?  // JSON: per-criterion scores + notes
   overallScore Float?
 
+  versions     CreativeVersion[]
+
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+// Edit history for a creative (Tier-1 prompt-based edits). Version 1 is the
+// original render; each subsequent version is one prompt-based edit. The active
+// version is whichever pngPath currently sits on Creative.finalPngPath, so
+// reverting just points finalPngPath (and the cached score) back at a version.
+model CreativeVersion {
+  id           String   @id @default(cuid())
+  creativeId   String
+  creative     Creative @relation(fields: [creativeId], references: [id], onDelete: Cascade)
+
+  index        Int      // 1 = original, 2+ = edits
+  pngPath      String   // relative under /data
+  instruction  String?  // null for the original; the edit instruction otherwise
+  score        String?  // JSON score snapshot at this version
+  overallScore Float?
+
+  createdAt    DateTime @default(now())
+
+  @@index([creativeId])
 }
 
 // Canva Connect OAuth tokens. This is a single-user local app, so there is exactly

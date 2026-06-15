@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { AppHeader } from "@/components/AppHeader";
 import { CreativeEditor } from "./CreativeEditor";
 import { fileUrl } from "@/lib/storage";
+import { versionsPayload } from "@/lib/versions";
 import type { EditableText, Score } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,7 @@ export default async function CreativeDetailPage({
 
   const text = JSON.parse(creative.editableText) as EditableText;
   const score = creative.score ? (JSON.parse(creative.score) as Score) : null;
+  const versionsInit = (await versionsPayload(cid))?.versions ?? [];
 
   return (
     <>
@@ -34,6 +36,7 @@ export default async function CreativeDetailPage({
           cid={cid}
           initialText={text}
           initialPngUrl={creative.finalPngPath ? fileUrl(creative.finalPngPath) : null}
+          initialVersions={versionsInit}
           meta={{
             index: creative.index,
             angle: creative.brief?.angle?.type ?? null,

@@ -28,7 +28,26 @@ export function randomState(): string {
   return crypto.randomBytes(24).toString("base64url");
 }
 
-export function buildAuthorizeUrl(state: string, codeChallenge: string): string {
+// The public origin the app is actually being served on, from the request headers
+// (honoring reverse-proxy headers). Lets the OAuth redirect adapt to whatever
+// host/port is in use instead of a hardcoded one.
+export function originFromRequest(req: Request): string {
+  const h = req.headers;
+  const host = h.get("x-forwarded-host") ?? h.get("host");
+  if (!host) return new URL(req.url).origin;
+  const isLoopback = /^(127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(:\d+)?$/i.test(host);
+  const proto = h.get("x-forwarded-proto") ?? (isLoopback ? "http" : "https");
+  return `${proto}://${host}`;
+}
+
+// The redirect URI to use for this request: an explicit env override if set,
+// otherwise derived from the live request origin. This MUST be identical between
+// the authorize step and the token exchange, so we stash it in a cookie between them.
+export function redirectUriFromRequest(req: Request): string {
+  return config.canva.redirectUriOverride ?? `${originFromRequest(req)}/api/canva/callback`;
+}
+
+export function buildAuthorizeUrl(state: string, codeChallenge: string, redirectUri: string): string {
   const params = new URLSearchParams({
     response_type: "code",
     client_id: config.canva.clientId,
@@ -36,7 +55,7 @@ export function buildAuthorizeUrl(state: string, codeChallenge: string): string 
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
     state,
-    redirect_uri: config.canva.redirectUri,
+    redirect_uri: redirectUri,
   });
   return `${AUTHORIZE_URL}?${params.toString()}`;
 }
@@ -72,13 +91,17 @@ async function postToken(body: URLSearchParams): Promise<TokenResponse> {
   return (await res.json()) as TokenResponse;
 }
 
-export async function exchangeCodeForTokens(code: string, codeVerifier: string): Promise<TokenResponse> {
+export async function exchangeCodeForTokens(
+  code: string,
+  codeVerifier: string,
+  redirectUri: string
+): Promise<TokenResponse> {
   return postToken(
     new URLSearchParams({
       grant_type: "authorization_code",
       code,
       code_verifier: codeVerifier,
-      redirect_uri: config.canva.redirectUri,
+      redirect_uri: redirectUri,
     })
   );
 }
@@ -144,9 +167,18 @@ export async function getValidAccessToken(): Promise<string | null> {
     return row.accessToken;
   }
 
-  const refreshed = await refreshTokens(row.refreshToken);
-  await saveTokens(refreshed);
-  return refreshed.access_token;
+  // Refresh can fail if the refresh token was rotated out from under us (e.g. two
+  // app instances refreshing concurrently) or revoked. Don't crash the caller —
+  // forget the dead token and report "not connected" so the user can re-authorize.
+  try {
+    const refreshed = await refreshTokens(row.refreshToken);
+    await saveTokens(refreshed);
+    return refreshed.access_token;
+  } catch (err) {
+    console.error("[canva] token refresh failed, clearing stored token:", err);
+    await clearStoredTokens();
+    return null;
+  }
 }
 
 // ── Asset upload + design creation ──────────────────────────────────────────────

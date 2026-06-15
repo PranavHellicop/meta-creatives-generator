@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { exchangeCodeForTokens, storeInitialTokens } from "@/lib/canva/client";
-import { config } from "@/lib/env";
+import {
+  exchangeCodeForTokens,
+  storeInitialTokens,
+  originFromRequest,
+  redirectUriFromRequest,
+} from "@/lib/canva/client";
 
 export const runtime = "nodejs";
 
-const COOKIES = ["canva_pkce_verifier", "canva_oauth_state", "canva_return_to"];
+const COOKIES = ["canva_pkce_verifier", "canva_oauth_state", "canva_return_to", "canva_redirect_uri"];
 
 function clearCookies(res: NextResponse) {
   for (const name of COOKIES) res.cookies.set(name, "", { path: "/", maxAge: 0 });
@@ -22,9 +26,13 @@ export async function GET(req: NextRequest) {
   const savedState = req.cookies.get("canva_oauth_state")?.value;
   const returnToRaw = req.cookies.get("canva_return_to")?.value || "/";
   const returnTo = returnToRaw.startsWith("/") ? returnToRaw : "/";
+  // The exact redirect URI used at authorize time (must match for token exchange);
+  // fall back to deriving from this request's origin.
+  const redirectUri = req.cookies.get("canva_redirect_uri")?.value || redirectUriFromRequest(req);
 
   const back = (status: "connected" | "error") => {
-    const dest = new URL(returnTo, config.appUrl);
+    // Return to the same origin the user is on, not a hardcoded one.
+    const dest = new URL(returnTo, originFromRequest(req));
     dest.searchParams.set("canva", status);
     const res = NextResponse.redirect(dest);
     clearCookies(res);
@@ -36,7 +44,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const tokens = await exchangeCodeForTokens(code, verifier);
+    const tokens = await exchangeCodeForTokens(code, verifier, redirectUri);
     await storeInitialTokens(tokens);
   } catch (err) {
     console.error("[canva] token exchange failed:", err);

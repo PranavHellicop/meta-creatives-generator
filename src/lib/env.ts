@@ -27,8 +27,9 @@ export const config = {
     get clientSecret() {
       return required("CANVA_CLIENT_SECRET");
     },
-    redirectUri:
-      process.env.CANVA_REDIRECT_URI ||
-      `${process.env.APP_URL || "http://localhost:3000"}/api/canva/callback`,
+    // Optional explicit override (e.g. production behind a proxy). When unset, the
+    // redirect URI is derived from the actual request origin at runtime so the
+    // OAuth flow works on whatever host/port the app is currently served on.
+    redirectUriOverride: process.env.CANVA_REDIRECT_URI || undefined,
   },
 };
