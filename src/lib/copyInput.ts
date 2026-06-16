@@ -1,11 +1,12 @@
-// Parsing helpers for user-provided ad copy (headline file + CTA text field).
-// Shared by the new-project form (live preview), the projects API (authoritative
-// parse), and the pipeline orchestrator (CTA distribution).
+// Parsing helpers for user-provided ad copy (headlines, subheadlines, CTAs).
+// Shared by the new-project form (live count), the projects API (authoritative
+// parse), and the pipeline orchestrator (copy distribution). Headlines, subheadlines
+// and CTAs are all entered one-per-line (textarea or uploaded .md/.txt).
 
-// One headline option per non-empty line. Tolerant of common markdown: strips
-// leading bullets (- * +), numbering (1. / 1)), heading marks (#), and blockquotes
-// (>). Skips blank lines and horizontal rules (---, ***, ___).
-export function parseHeadlineMarkdown(text: string): string[] {
+// One option per non-empty line. Tolerant of common markdown: strips leading bullets
+// (- * +), numbering (1. / 1)), heading marks (#), and blockquotes (>). Skips blank
+// lines and horizontal rules (---, ***, ___).
+export function parseLines(text: string): string[] {
   return text
     .split(/\r?\n/)
     .map((line) =>
@@ -16,14 +17,6 @@ export function parseHeadlineMarkdown(text: string): string[] {
         .trim()
     )
     .filter((line) => line.length > 0 && !/^[-*_]{3,}$/.test(line)); // drop empties + rules
-}
-
-// Comma-separated CTA options → trimmed, non-empty list.
-export function parseCtaList(text: string): string[] {
-  return text
-    .split(",")
-    .map((c) => c.trim())
-    .filter((c) => c.length > 0);
 }
 
 // Build the set of CTA "variants" to spread across ads:

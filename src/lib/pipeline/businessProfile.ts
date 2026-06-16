@@ -7,6 +7,7 @@ interface Input {
   service: string;
   audience: string;
   offer: string;
+  prompt?: string | null;
   notes?: string | null;
   igUrl?: string | null;
   fbUrl?: string | null;
@@ -37,6 +38,7 @@ NICHE: ${input.niche}
 PRIMARY SERVICE: ${input.service}
 TARGET AUDIENCE: ${input.audience}
 OFFER: ${input.offer}
+${input.prompt ? `OPERATOR'S DESCRIPTION OF THE BUSINESS/NEED (mine this for intelligence): ${input.prompt}` : ""}
 ${input.notes ? `ADDITIONAL NOTES FROM USER: ${input.notes}` : ""}
 ${input.igUrl ? `INSTAGRAM: ${input.igUrl}` : ""}
 ${input.fbUrl ? `FACEBOOK: ${input.fbUrl}` : ""}

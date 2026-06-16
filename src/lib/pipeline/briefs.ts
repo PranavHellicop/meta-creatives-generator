@@ -14,7 +14,7 @@ import {
 const BriefBatchSchema = z.object({ briefs: z.array(CreativeBriefSchema) });
 
 // Per-angle copy the user supplied that must be honored (aligned by index to `angles`).
-export type CopyOverride = { headline?: string; ctas?: string[] };
+export type CopyOverride = { headline?: string; subheadline?: string; ctas?: string[] };
 
 export async function generateBriefs(
   angles: Angle[],
@@ -30,6 +30,7 @@ export async function generateBriefs(
 For EACH angle, write a complete, production-ready creative brief for a 1:1 (1080×1080) Meta ad.
 
 CRITICAL RULES:
+- DEFAULT MARKET IS INDIA: unless the inputs clearly indicate another country, write for an Indian audience in Indian English and express any prices, discounts, or money amounts in Indian Rupees (₹).
 - Copy is conversion-first, punchy, specific. No fluff, no clichés, no emojis.
 - Headlines ≤ 8 words. CTA ≤ 4 words (e.g. "Book Now", "Get Started").
 - visualConcept describes ONLY imagery/scene/mood — NEVER mention any text, words, or letters (text is rendered separately).
@@ -39,7 +40,7 @@ CRITICAL RULES:
 - layoutType MUST be one of: ${allowed.join(", ")}.
 - MAXIMIZE diversity across the set: vary layoutType, headline structure, emotion, and color emphasis. Avoid two similar creatives.
 - Keep colors on-brand using the brand palette, but vary which color leads each creative.
-- Some angles below specify a REQUIRED HEADLINE and/or REQUIRED CTA(s). For those, you MUST use that exact text verbatim as the headline/cta, and write the subheadline + supporting copy to fit and support it. For angles with no requirement, write your own headline/CTA per the rules above.`;
+- Some angles below specify a REQUIRED HEADLINE, REQUIRED SUBHEADLINE, and/or REQUIRED CTA(s). For those, you MUST use that exact text verbatim, and write the remaining copy to fit and support it. For angles with no requirement, write your own per the rules above.`;
 
   const user = `BRAND: ${profile.brandName} — ${profile.service}
 OFFER: ${profile.offer}
@@ -67,6 +68,9 @@ ${angles
       const ov = copyOverrides?.[i];
       if (ov?.headline) {
         line += `\n   REQUIRED HEADLINE (use this exact text, verbatim, as the headline): "${ov.headline}"`;
+      }
+      if (ov?.subheadline) {
+        line += `\n   REQUIRED SUBHEADLINE (use this exact text, verbatim, as the subheadline): "${ov.subheadline}"`;
       }
       if (ov?.ctas?.length) {
         line +=

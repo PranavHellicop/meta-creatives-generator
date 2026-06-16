@@ -1,15 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppHeader } from "@/components/AppHeader";
-import { parseHeadlineMarkdown } from "@/lib/copyInput";
+import { parseLines } from "@/lib/copyInput";
 
 const inputCls =
   "w-full rounded-lg border border-border bg-surface-2 px-3.5 py-2.5 text-sm outline-none transition placeholder:text-muted/50 focus:border-accent focus:ring-2 focus:ring-accent/20";
+const COUNT_GREEN: React.CSSProperties = { color: "#059669" };
 const labelCls = "block text-sm font-medium mb-2";
 const helpCls = "mt-2 text-xs leading-relaxed text-muted";
-const cardCls = "rounded-2xl border border-border bg-surface p-6";
+const cardCls = "rounded-2xl border border-border bg-surface p-8";
 
 function ChevronIcon({ open }: { open: boolean }) {
   return (
@@ -51,7 +52,7 @@ function Disclosure({
           <span className="rounded-full bg-accent/15 px-2.5 py-0.5 text-xs font-medium text-accent">{badge}</span>
         )}
       </button>
-      {open && <div className="space-y-6 border-t border-border px-6 pb-6 pt-5">{children}</div>}
+      {open && <div className="grid gap-6 border-t border-border px-6 pb-6 pt-5 sm:grid-cols-2 lg:gap-8">{children}</div>}
     </div>
   );
 }
@@ -82,32 +83,53 @@ export default function NewProjectPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [form, setForm] = useState({
-    name: "",
-    niche: "",
-    service: "",
+    headlines: "",
+    subheadlines: "",
+    prompt: "",
+    ctas: "",
     audience: "",
-    offer: "",
     websiteUrl: "",
     notes: "",
-    ctas: "",
   });
   const [featureFounder, setFeatureFounder] = useState<boolean | null>(null);
   const [photos, setPhotos] = useState<File[]>([]);
-  const [creativeCount, setCreativeCount] = useState(10);
-  const [headlineFile, setHeadlineFile] = useState<File | null>(null);
-  const [headlineCount, setHeadlineCount] = useState(0);
+  const [creativeCount, setCreativeCount] = useState(0);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  async function onHeadlineFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] ?? null;
-    setHeadlineFile(file);
-    setHeadlineCount(file ? parseHeadlineMarkdown(await file.text()).length : 0);
+  // Upload a .md/.txt file straight into a textarea (textarea stays the source of truth).
+  function loadFileInto(k: keyof typeof form) {
+    return async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        const text = await file.text();
+        setForm((f) => ({ ...f, [k]: text }));
+      }
+      e.target.value = ""; // allow re-uploading the same file
+    };
   }
 
-  const step1Valid =
-    form.name && form.niche && form.service && form.audience && form.offer;
+  // Object-URL previews for the uploaded founder photos (revoked on change/unmount).
+  const photoPreviews = useMemo(
+    () => photos.map((p) => ({ name: p.name, url: URL.createObjectURL(p) })),
+    [photos]
+  );
+  useEffect(() => () => photoPreviews.forEach((p) => URL.revokeObjectURL(p.url)), [photoPreviews]);
+
+  function removePhoto(i: number) {
+    setPhotos((ps) => ps.filter((_, idx) => idx !== i));
+  }
+
+  const headlineCount = parseLines(form.headlines).length;
+  const subheadlineCount = parseLines(form.subheadlines).length;
+  const ctaCount = parseLines(form.ctas).length;
+  const step1Valid = headlineCount > 0;
+
+  function goToStep2() {
+    setCreativeCount(headlineCount); // default the batch size to the number of headlines
+    setStep(2);
+  }
 
   async function submit() {
     setSubmitting(true);
@@ -118,7 +140,6 @@ export default function NewProjectPage() {
       fd.append("featureFounder", String(featureFounder === true));
       fd.append("creativeCount", String(creativeCount));
       if (featureFounder) photos.forEach((p) => fd.append("photos", p));
-      if (headlineFile) fd.append("headlineFile", headlineFile);
 
       const res = await fetch("/api/projects", { method: "POST", body: fd });
       if (!res.ok) throw new Error((await res.json()).error || "Failed to create project");
@@ -136,8 +157,8 @@ export default function NewProjectPage() {
   return (
     <>
       <AppHeader />
-      <main className="mx-auto max-w-2xl px-6 py-12">
-        <div className="mb-10 flex items-center gap-3 text-sm">
+      <main className="mx-auto max-w-6xl px-8 pt-10">
+        <div className="mb-8 flex items-center gap-3 text-sm">
           <StepDot n={1} step={step} label="Business" />
           <div className="h-px flex-1 bg-border" />
           <StepDot n={2} step={step} label="Featuring & batch" />
@@ -146,65 +167,74 @@ export default function NewProjectPage() {
         {step === 1 && (
           <div className="space-y-6">
             <header>
-              <h1 className="text-2xl font-semibold tracking-tight">Tell us about the business</h1>
+              <h1 className="text-2xl font-semibold tracking-tight">What are we advertising?</h1>
               <p className="mt-1.5 text-sm text-muted">
-                The essentials are all we need to start — everything else is optional.
+                Add your headlines and describe the business — the AI figures out the rest. Only the
+                headline is required.
               </p>
             </header>
 
             <section className={cardCls}>
-              <div className="space-y-5">
-                <Field label="Business name *">
-                  <input className={inputCls} value={form.name} onChange={set("name")} placeholder="Bright Smile Dental" />
+              <div className="grid gap-6 sm:grid-cols-2 lg:gap-8">
+                <LinesField
+                  label="Headlines"
+                  required
+                  value={form.headlines}
+                  onChange={set("headlines")}
+                  onFile={loadFileInto("headlines")}
+                  count={headlineCount}
+                  unit="headline"
+                  rows={5}
+                  placeholder={"One headline per line, e.g.\nSitting 8 hours a day? Your spine pays for it.\nBack pain isn't just age — it's posture."}
+                  help="One ad each, in order. Add more in the next step for extra AI-written ones."
+                />
+                <Field label="Prompt">
+                  <textarea
+                    className={inputCls}
+                    rows={5}
+                    value={form.prompt}
+                    onChange={set("prompt")}
+                    placeholder="Describe the business and what you need — who they are, the service, the offer, the goal. e.g. 'Physiotherapy clinic for desk workers with back pain; promoting a free posture assessment + 20% off the first session.'"
+                  />
+                  {!form.prompt.trim() && (
+                    <p className={helpCls}>
+                      The more you describe, the more the AI extracts — business, niche, service, and
+                      offer are all derived from this (and your website, if added).
+                    </p>
+                  )}
                 </Field>
-                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                  <Field label="Niche / Industry *">
-                    <input className={inputCls} value={form.niche} onChange={set("niche")} placeholder="Dentist" />
-                  </Field>
-                  <Field label="Primary service *">
-                    <input className={inputCls} value={form.service} onChange={set("service")} placeholder="Teeth whitening" />
-                  </Field>
-                </div>
-                <Field label="Target audience *">
-                  <input className={inputCls} value={form.audience} onChange={set("audience")} placeholder="Adults 28-50 self-conscious about their smile" />
-                </Field>
-                <Field label="Offer *">
-                  <input className={inputCls} value={form.offer} onChange={set("offer")} placeholder="Free smile consultation + £100 off whitening" />
+                <LinesField
+                  label="Subheadlines"
+                  value={form.subheadlines}
+                  onChange={set("subheadlines")}
+                  onFile={loadFileInto("subheadlines")}
+                  count={subheadlineCount}
+                  unit="subheadline"
+                  rows={3}
+                  placeholder={"Optional — one per line, paired to the headlines in order."}
+                  help="Optional. Used in order with the headlines; the rest are AI-written."
+                />
+                <LinesField
+                  label="CTA(s)"
+                  value={form.ctas}
+                  onChange={set("ctas")}
+                  count={ctaCount}
+                  unit="CTA"
+                  rows={3}
+                  placeholder={"One CTA per line, e.g.\nBook a Call\nDownload the Guide"}
+                  help={
+                    ctaCount > 1
+                      ? "Spread across the set; distinct ones may be combined where it makes sense."
+                      : "Optional, one per line. One CTA is used on every ad; multiple are spread across the set."
+                  }
+                />
+              </div>
+              <div className="mt-5">
+                <Field label="Target audience">
+                  <input className={inputCls} value={form.audience} onChange={set("audience")} placeholder="Optional — e.g. Adults 28-50 with desk jobs and chronic back pain" />
                 </Field>
               </div>
             </section>
-
-            <Disclosure
-              title="Bring your own copy"
-              subtitle="Supply exact headlines and CTAs to use in the final ads"
-              badge={headlineCount > 0 || form.ctas.trim() ? "Added" : null}
-            >
-              <Field label="Headline options">
-                <FileField
-                  accept=".md,.markdown,.txt"
-                  onChange={onHeadlineFile}
-                  fileLabel={headlineFile?.name ?? null}
-                />
-                <p className={helpCls}>
-                  {headlineCount > 0
-                    ? `${headlineCount} headline${headlineCount === 1 ? "" : "s"} detected. Used in order — extra ads get AI-written headlines.`
-                    : "A .md / .txt file, one headline per line. Used in order; extra ads get AI-written headlines."}
-                </p>
-              </Field>
-              <Field label="CTA(s)">
-                <textarea
-                  className={inputCls}
-                  rows={2}
-                  value={form.ctas}
-                  onChange={set("ctas")}
-                  placeholder="e.g. Book a Call"
-                />
-                <p className={helpCls}>
-                  Separate multiple with commas. One CTA is used on every ad; multiple are spread across the
-                  set — some on their own, some combined where it makes sense.
-                </p>
-              </Field>
-            </Disclosure>
 
             <Disclosure
               title="Improve research quality"
@@ -215,19 +245,24 @@ export default function NewProjectPage() {
                 <input className={inputCls} value={form.websiteUrl} onChange={set("websiteUrl")} placeholder="https://..." />
               </Field>
               <Field label="Additional notes">
-                <textarea className={inputCls} rows={3} value={form.notes} onChange={set("notes")} placeholder="Awards, testimonials, brand voice, anything useful..." />
+                <input className={inputCls} value={form.notes} onChange={set("notes")} placeholder="Awards, testimonials, brand voice, anything useful..." />
               </Field>
             </Disclosure>
 
-            <div className="flex justify-end pt-1">
+            <StickyBar>
+              <span className="text-xs text-muted">
+                {step1Valid
+                  ? `${headlineCount} headline${headlineCount === 1 ? "" : "s"} ready`
+                  : "Add at least one headline to continue"}
+              </span>
               <button
                 disabled={!step1Valid}
-                onClick={() => setStep(2)}
+                onClick={goToStep2}
                 className="rounded-lg bg-accent px-6 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-40"
               >
                 Continue
               </button>
-            </div>
+            </StickyBar>
           </div>
         )}
 
@@ -265,29 +300,57 @@ export default function NewProjectPage() {
                   fileLabel={photos.length ? `${photos.length} photo${photos.length === 1 ? "" : "s"} selected` : null}
                 />
                 <p className={helpCls}>Clear, well-lit photos work best — front-facing, minimal background clutter.</p>
+                {photoPreviews.length > 0 && (
+                  <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-4">
+                    {photoPreviews.map((p, i) => (
+                      <div
+                        key={p.url}
+                        className="group relative aspect-square overflow-hidden rounded-lg border border-border bg-surface-2"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={p.url} alt={p.name} className="h-full w-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => removePhoto(i)}
+                          aria-label={`Remove ${p.name}`}
+                          className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition hover:bg-black/80 group-hover:opacity-100"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </section>
             )}
 
-            {featureFounder !== null && (
-              <section className={cardCls}>
-                <div className="flex items-center justify-between">
-                  <label className={labelCls + " mb-0"}>How many creatives?</label>
-                  <span className="rounded-md bg-surface-2 px-2.5 py-1 text-sm font-semibold tabular-nums">{creativeCount}</span>
-                </div>
-                <input
-                  type="range" min={1} max={15} value={creativeCount}
-                  onChange={(e) => setCreativeCount(Number(e.target.value))}
-                  className="mt-4 w-full accent-[var(--accent)]"
-                />
-                <div className="mt-1.5 flex justify-between text-xs text-muted">
-                  <span>1</span><span>15</span>
-                </div>
-              </section>
-            )}
+            {featureFounder !== null && (() => {
+              const min = Math.max(1, headlineCount);
+              const max = Math.max(min + 10, 15);
+              return (
+                <section className={cardCls}>
+                  <div className="flex items-center justify-between">
+                    <label className={labelCls + " mb-0"}>How many creatives?</label>
+                    <span className="rounded-md bg-surface-2 px-2.5 py-1 text-sm font-semibold tabular-nums">{creativeCount}</span>
+                  </div>
+                  <input
+                    type="range" min={min} max={max} value={creativeCount}
+                    onChange={(e) => setCreativeCount(Number(e.target.value))}
+                    className="mt-4 w-full accent-[var(--accent)]"
+                  />
+                  <div className="mt-1.5 flex justify-between text-xs text-muted">
+                    <span>{min}</span><span>{max}</span>
+                  </div>
+                  <p className={helpCls}>
+                    Defaults to your {headlineCount} headline{headlineCount === 1 ? "" : "s"} — increase to add AI-written ones.
+                  </p>
+                </section>
+              );
+            })()}
 
             {error && <p className="text-sm text-red-400">{error}</p>}
 
-            <div className="flex items-center justify-between pt-1">
+            <StickyBar>
               <button onClick={() => setStep(1)} className="text-sm text-muted transition hover:text-foreground">
                 ← Back
               </button>
@@ -298,7 +361,7 @@ export default function NewProjectPage() {
               >
                 {submitting ? "Creating…" : "Generate creatives"}
               </button>
-            </div>
+            </StickyBar>
           </div>
         )}
       </main>
@@ -306,12 +369,66 @@ export default function NewProjectPage() {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+// Sticky action bar pinned to the bottom of the viewport so the primary button
+// is always reachable without scrolling to the end of a long form.
+function StickyBar({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="sticky bottom-0 z-10 -mx-8 mt-2 border-t border-border bg-background/80 px-8 py-4 backdrop-blur">
+      <div className="flex items-center justify-between gap-4">{children}</div>
+    </div>
+  );
+}
+
+function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
     <div>
-      <label className={labelCls}>{label}</label>
+      <label className={labelCls}>
+        {label}
+        {required && <span className="ml-0.5 text-red-500">*</span>}
+      </label>
       {children}
     </div>
+  );
+}
+
+// Textarea (one item per line) with a live count and an optional inline
+// "Upload .md/.txt" that loads file text into the textarea (the textarea stays
+// the single source of truth).
+function LinesField({
+  label, required, value, onChange, onFile, placeholder, help, count, unit, rows = 4,
+}: {
+  label: string;
+  required?: boolean;
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
+  onFile?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  placeholder: string;
+  help: string;
+  count: number;
+  unit: string;
+  rows?: number;
+}) {
+  return (
+    <Field label={label} required={required}>
+      <textarea className={inputCls} rows={rows} value={value} onChange={onChange} placeholder={placeholder} />
+      <div className="mt-2 flex items-start justify-between gap-3">
+        <p className="mt-0 text-xs leading-relaxed">
+          {count > 0 ? (
+            <span className="font-semibold" style={COUNT_GREEN}>
+              {count} {unit}{count === 1 ? "" : "s"}
+            </span>
+          ) : (
+            <span className="text-muted">{help}</span>
+          )}
+        </p>
+        {onFile && (
+          <label className="shrink-0 cursor-pointer whitespace-nowrap text-xs font-medium text-accent hover:underline">
+            ↑ Upload .md/.txt
+            <input type="file" accept=".md,.markdown,.txt" className="hidden" onChange={onFile} />
+          </label>
+        )}
+      </div>
+    </Field>
   );
 }
 

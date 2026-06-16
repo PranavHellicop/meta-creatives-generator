@@ -35,6 +35,8 @@ type Status = {
   status: string;
   statusDetail: string | null;
   error: string | null;
+  name: string;
+  niche: string;
   creatives: Creative[];
 };
 
@@ -97,8 +99,10 @@ export function ProjectView({
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <span className="text-xs uppercase tracking-wide text-muted">{initialNiche}</span>
-          <h1 className="text-2xl font-semibold">{initialName}</h1>
+          {(data?.niche || initialNiche) && (
+            <span className="text-xs uppercase tracking-wide text-muted">{data?.niche || initialNiche}</span>
+          )}
+          <h1 className="text-2xl font-semibold">{data?.name || initialName}</h1>
         </div>
         <div className="flex items-center gap-3">
           {done && (

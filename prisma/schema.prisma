@@ -12,11 +12,16 @@ datasource db {
 
 model Project {
   id            String   @id @default(cuid())
+  // name/niche/service/offer/audience are no longer entered directly — the form is
+  // prompt-first. They're set to provisional placeholders at creation and overwritten
+  // by the intake step (src/lib/pipeline/intake.ts), which derives them from the
+  // prompt + provided copy + website research. Kept non-null to avoid null-handling.
   name          String
   niche         String
   service       String
   audience      String
   offer         String
+  prompt        String?          // free-text description of the business/need (primary intake signal)
   websiteUrl    String?
   igUrl         String?
   fbUrl         String?
@@ -34,8 +39,9 @@ model Project {
 
   rawResearch     String?          // raw scraped website text (truncated)
   visualAnchor    String?          // locked 50-75 word image generation modifier for this brand
-  providedHeadlines String?        // JSON array of user-supplied headlines (used in order, AI fills the rest)
-  providedCtas      String?        // JSON array of user-supplied CTAs (comma-separated in the form)
+  providedHeadlines String?        // JSON array of user-supplied headlines (one per line; used in order, AI fills the rest)
+  providedSubheadlines String?     // JSON array of user-supplied subheadlines (one per line; used in order, AI fills the rest)
+  providedCtas      String?        // JSON array of user-supplied CTAs (one per line in the form)
   referenceDigest String?          // structure/placement patterns learned from the data/references swipe folder (if any)
   businessProfile BusinessProfile?
   marketProfile   MarketProfile?

@@ -25,6 +25,9 @@ export async function GET(
     status: project.status,
     statusDetail: project.statusDetail,
     error: project.error,
+    // name/niche are derived by the intake step mid-run, so surface them for the live header.
+    name: project.name,
+    niche: project.niche,
     creatives: project.creatives.map((c) => {
       const text = JSON.parse(c.editableText) as EditableText;
       return {

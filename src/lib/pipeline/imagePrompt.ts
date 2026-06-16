@@ -46,6 +46,7 @@ export function buildFullAdPrompt(
     `Scene/backdrop: ${brief.visualConcept}.`,
     personInstruction,
     textZone,
+    `Unless the brand or scene clearly indicates another country, assume an Indian market: any depicted people (other than a provided founder photo), settings, attire, and props should read as authentically Indian, and render any prices or money amounts in Indian Rupees (₹).`,
     referenceGuidance
       ? `Follow these proven structural/placement patterns for this niche (structure ONLY — do not copy any words or imagery from the references): ${referenceGuidance.replace(/\n/g, " ")}`
       : "",

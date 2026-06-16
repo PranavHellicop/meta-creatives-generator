@@ -49,13 +49,15 @@ export function ProjectCard({
         className="flex h-full flex-col rounded-xl border border-border bg-surface p-5 hover:border-accent/60 transition group"
       >
         <div className="flex items-start justify-between gap-2 mb-2">
-          <span className="text-xs uppercase tracking-wide text-muted line-clamp-2">{niche}</span>
+          <span className="text-xs uppercase tracking-wide text-muted line-clamp-2">
+            {niche || (status !== "done" && status !== "error" ? "Analyzing…" : "")}
+          </span>
           <span className="shrink-0 text-xs rounded-full bg-surface-2 px-2 py-0.5 text-muted">
             {STATUS_LABEL[status] ?? status}
           </span>
         </div>
         <h2 className="font-semibold group-hover:text-accent transition pr-6 line-clamp-1">{name}</h2>
-        <p className="text-sm text-muted mt-1 line-clamp-2">{service}</p>
+        {service && <p className="text-sm text-muted mt-1 line-clamp-2">{service}</p>}
         <p className="text-xs text-muted mt-auto pt-3">
           {creativeCount} creative{creativeCount === 1 ? "" : "s"}
         </p>

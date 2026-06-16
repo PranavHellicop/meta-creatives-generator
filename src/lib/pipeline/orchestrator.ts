@@ -12,6 +12,7 @@ import { saveFile, readFile } from "@/lib/storage";
 import { buildCtaVariants } from "@/lib/copyInput";
 import { assessCtaCombinable } from "./ctaStrategy";
 import { buildReferenceGuidance } from "./references";
+import { deriveProjectBasics } from "./intake";
 import type { ArtDirection, CreativeBrief, EditableText } from "@/lib/types";
 
 async function setStatus(id: string, status: string, detail?: string) {
@@ -46,12 +47,15 @@ export async function runPipeline(projectId: string): Promise<void> {
     // User-provided copy. Headlines are assigned to ads in order (AI fills any gap).
     // CTA variants are cycled across ads: each single CTA, plus the all-combined variant.
     const providedHeadlines: string[] = project.providedHeadlines ? JSON.parse(project.providedHeadlines) : [];
+    const providedSubheadlines: string[] = project.providedSubheadlines ? JSON.parse(project.providedSubheadlines) : [];
     const providedCtas: string[] = project.providedCtas ? JSON.parse(project.providedCtas) : [];
     // Only pair multiple CTAs on one ad when the LLM judges them distinct &
     // complementary; synonymous CTAs stay on separate ads (no redundant combo).
     const ctasCombinable = await assessCtaCombinable(providedCtas);
     const ctaVariants = buildCtaVariants(providedCtas, ctasCombinable);
+    // Headlines & subheadlines are assigned to ads in order; AI fills any gap.
     const headlineFor = (i: number): string | undefined => providedHeadlines[i];
+    const subheadlineFor = (i: number): string | undefined => providedSubheadlines[i];
     const ctasFor = (i: number): string[] | undefined =>
       ctaVariants.length ? ctaVariants[i % ctaVariants.length] : undefined;
 
@@ -59,12 +63,32 @@ export async function runPipeline(projectId: string): Promise<void> {
     await setStatus(projectId, "researching", project.websiteUrl ? "Reading website" : "Skipping (no URL)");
     const research = await researchWebsite(project.websiteUrl);
 
-    // [2] Business profile — WHO is this expert and WHY should anyone choose them
+    // [1.5] Intake — the form is prompt-first, so derive the business basics
+    // (name / niche / service / offer / audience) from the prompt + provided copy +
+    // research, and persist them so the rest of the pipeline, the UI, references,
+    // and Canva all read real values.
+    await setStatus(projectId, "profiling", "Understanding the business");
+    const basics = await deriveProjectBasics({
+      prompt: project.prompt,
+      audience: project.audience,
+      headlines: providedHeadlines,
+      subheadlines: providedSubheadlines,
+      ctas: providedCtas,
+      notes: project.notes,
+      research,
+    });
+    await prisma.project.update({
+      where: { id: projectId },
+      data: { name: basics.name, niche: basics.niche, service: basics.service, offer: basics.offer, audience: basics.audience },
+    });
+
+    // [2] Business profile — WHO is this expert and WHY should anyone choose them.
+    // Pass the raw prompt so the deep-intelligence stage mines the user's own words too.
     await setStatus(projectId, "profiling");
     const profile = await buildBusinessProfile({
-      name: project.name, niche: project.niche, service: project.service,
-      audience: project.audience, offer: project.offer, notes: project.notes,
-      igUrl: project.igUrl, fbUrl: project.fbUrl, research,
+      name: basics.name, niche: basics.niche, service: basics.service,
+      audience: basics.audience, offer: basics.offer, notes: project.notes,
+      prompt: project.prompt, igUrl: project.igUrl, fbUrl: project.fbUrl, research,
     });
     await prisma.project.update({ where: { id: projectId }, data: { rawResearch: research.text || null } });
     await prisma.businessProfile.upsert({
@@ -74,7 +98,7 @@ export async function runPipeline(projectId: string): Promise<void> {
 
     // [3] Market understanding — niche audience psychology + design patterns (typography, proportion, photography)
     await setStatus(projectId, "market");
-    const market = await buildMarketProfile(project.niche, project.audience, profile);
+    const market = await buildMarketProfile(basics.niche, basics.audience, profile);
     await prisma.marketProfile.upsert({
       where: { projectId }, create: { projectId, data: JSON.stringify(market) },
       update: { data: JSON.stringify(market) },
@@ -88,7 +112,7 @@ export async function runPipeline(projectId: string): Promise<void> {
     // [3.6] Reference swipe file — if the user dropped example creatives into
     // data/references/<niche|service>/, learn their structure & placement (only).
     // Empty/missing folder → "" and everything proceeds exactly as before.
-    const referenceGuidance = await buildReferenceGuidance(project.niche, project.service);
+    const referenceGuidance = await buildReferenceGuidance(basics.niche, basics.service);
     if (referenceGuidance) {
       await setStatus(projectId, "anchoring", "Studying reference creatives");
       await prisma.project.update({ where: { id: projectId }, data: { referenceDigest: referenceGuidance } });
@@ -116,7 +140,7 @@ export async function runPipeline(projectId: string): Promise<void> {
     // [5] Briefs — full creative brief + art direction per angle (with market intelligence context).
     // Feed any user-provided headlines/CTAs so the LLM writes coherent copy around them.
     await setStatus(projectId, "briefs", `Writing ${selectedRows.length} briefs`);
-    const copyOverrides = selectedRows.map((_, i) => ({ headline: headlineFor(i), ctas: ctasFor(i) }));
+    const copyOverrides = selectedRows.map((_, i) => ({ headline: headlineFor(i), subheadline: subheadlineFor(i), ctas: ctasFor(i) }));
     const briefs = await generateBriefs(
       selectedRows.map((r) => ({ type: r.type as never, hook: r.hook, rationale: r.rationale })),
       mode, profile, market, copyOverrides, referenceGuidance
@@ -136,8 +160,10 @@ export async function runPipeline(projectId: string): Promise<void> {
 
       // Enforce user-provided copy verbatim (the LLM was asked to use it, but we guarantee it).
       const assignedHeadline = headlineFor(i);
+      const assignedSubheadline = subheadlineFor(i);
       const assignedCtas = ctasFor(i);
       if (assignedHeadline) brief.headline = assignedHeadline;
+      if (assignedSubheadline) brief.subheadline = assignedSubheadline;
       if (assignedCtas) brief.cta = assignedCtas.join("  +  ");
 
       // Inject founderZone from niche market research into the stored art direction.

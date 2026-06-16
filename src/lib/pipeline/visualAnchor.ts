@@ -24,6 +24,9 @@ The modifier must NOT mention:
 - People, faces, or human figures (the founder is composited separately)
 - The brand name or business name
 
+Unless the brand context clearly indicates another country, assume an Indian market: choose
+settings, environments, and visual cues that read as authentically Indian.
+
 Keep it 50-75 words. Make it specific enough that all 5-10 images generated from it
 look like they came from the same shoot.`;
 
