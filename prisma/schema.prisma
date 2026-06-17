@@ -29,20 +29,25 @@ model Project {
   featureFounder Boolean @default(false)
   creativeCount Int      @default(10)
 
-  // Pipeline status: idle | researching | profiling | market | angles | briefs | art | rendering | scoring | done | error
+  // Pipeline status: idle | researching | profiling | market | angles | briefs | art | rendering | scoring | done | error | draft
+  // "draft" = a stopped/incomplete generation the user can edit & regenerate or delete.
   status        String   @default("idle")
   statusDetail  String?  // human-readable progress, e.g. "Rendering 3/10"
   error         String?
+  stopRequested Boolean  @default(false) // set by the stop endpoint; the running pipeline checks it and bails to "draft"
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   rawResearch     String?          // raw scraped website text (truncated)
   visualAnchor    String?          // locked 50-75 word image generation modifier for this brand
+  providedPrompts String?          // JSON array of operator prompts (each = a per-creative brief; combined into `prompt` for global stages)
   providedHeadlines String?        // JSON array of user-supplied headlines (one per line; used in order, AI fills the rest)
   providedSubheadlines String?     // JSON array of user-supplied subheadlines (one per line; used in order, AI fills the rest)
   providedCtas      String?        // JSON array of user-supplied CTAs (one per line in the form)
   referenceDigest String?          // structure/placement patterns learned from the data/references swipe folder (if any)
+  designDirectives String?         // explicit design/placement/color instructions mined from the operator prompt (src/lib/pipeline/designDirectives.ts)
+  logoRequested   Boolean @default(false) // true only if the operator explicitly asked for a logo; otherwise NO logo is ever rendered/invented
   businessProfile BusinessProfile?
   marketProfile   MarketProfile?
   founderPhotos   FounderPhoto[]

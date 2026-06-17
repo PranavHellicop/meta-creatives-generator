@@ -6,9 +6,18 @@ import { useRouter } from "next/navigation";
 
 const STATUS_LABEL: Record<string, string> = {
   idle: "Draft",
+  draft: "Draft",
   done: "Complete",
   error: "Error",
 };
+
+// Color the badge so incomplete work is easy to spot at a glance.
+function statusBadgeCls(status: string): string {
+  if (status === "done") return "bg-green-500/15 text-green-400";
+  if (status === "draft" || status === "idle") return "bg-amber-500/15 text-amber-400";
+  if (status === "error") return "bg-red-500/15 text-red-400";
+  return "bg-surface-2 text-muted"; // in-progress
+}
 
 export function ProjectCard({
   id,
@@ -50,9 +59,9 @@ export function ProjectCard({
       >
         <div className="flex items-start justify-between gap-2 mb-2">
           <span className="text-xs uppercase tracking-wide text-muted line-clamp-2">
-            {niche || (status !== "done" && status !== "error" ? "Analyzing…" : "")}
+            {niche || (!["done", "error", "draft", "idle"].includes(status) ? "Analyzing…" : "")}
           </span>
-          <span className="shrink-0 text-xs rounded-full bg-surface-2 px-2 py-0.5 text-muted">
+          <span className={`shrink-0 text-xs rounded-full px-2 py-0.5 ${statusBadgeCls(status)}`}>
             {STATUS_LABEL[status] ?? status}
           </span>
         </div>

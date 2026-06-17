@@ -11,7 +11,10 @@ export function buildFullAdPrompt(
   founderProportionZone: number,
   mode: "founder" | "banner",
   ctas?: string[],
-  referenceGuidance?: string
+  referenceGuidance?: string,
+  designDirectives?: string,
+  logoRequested?: boolean,
+  brandName?: string
 ): string {
   const layoutType = brief.layoutType as LayoutType;
   const side = founderSideFromLayout(layoutType);
@@ -40,6 +43,20 @@ export function buildFullAdPrompt(
         : `Place all text on the ${side === "right" ? "left" : "right"} side of the image, clearly separated from the person.`
       : `Use a clean layout with the headline dominating the upper half and the CTA prominent at the bottom.`;
 
+  // The operator may have stated explicit design requirements in their prompt (colors,
+  // where the offer/CTA/headline go, layout, typography). These are AUTHORITATIVE and
+  // override the generic defaults above wherever they conflict.
+  const directivesLine = designDirectives?.trim()
+    ? `OPERATOR DESIGN REQUIREMENTS — these are explicit instructions from the client and take PRIORITY over the generic guidance above; follow them exactly: ${designDirectives.trim()}.`
+    : "";
+
+  // Logo policy. By default NEVER show a logo and NEVER invent one. Only when the operator
+  // explicitly asked for a logo do we allow the brand NAME as a clean typeset wordmark —
+  // still never an invented graphic mark/emblem (we have no logo asset to reproduce).
+  const logoLine = logoRequested
+    ? `• Brand presence: render the brand name${brandName?.trim() ? ` "${brandName.trim()}"` : ""} as a clean, simple typeset text wordmark only. Do NOT invent or draw any graphic logo, emblem, icon-mark, or symbol — text wordmark only.`
+    : `• ABSOLUTELY NO LOGO: do not include, draw, invent, or hallucinate any brand logo, emblem, wordmark, monogram, or symbol anywhere in the creative. Leave that space clean. This is a hard requirement.`;
+
   const lines = [
     `Create a complete, professional Meta ad creative (1080×1080 pixels, square format).`,
     visualAnchor,
@@ -50,6 +67,7 @@ export function buildFullAdPrompt(
     referenceGuidance
       ? `Follow these proven structural/placement patterns for this niche (structure ONLY — do not copy any words or imagery from the references): ${referenceGuidance.replace(/\n/g, " ")}`
       : "",
+    directivesLine,
     ``,
     `EXACT TEXT TO RENDER ON THE AD:`,
     `• Headline (large, bold, most prominent element): "${brief.headline}"`,
@@ -63,6 +81,7 @@ export function buildFullAdPrompt(
     `• Primary color: ${brief.artDirection.primaryColor}`,
     `• Accent/CTA color: ${brief.artDirection.accentColor}`,
     `• Mood: ${brief.artDirection.mood}`,
+    logoLine,
     `• All text must be crisp, perfectly legible, and professionally typeset — no handwriting, no distortion.`,
     `• High-end commercial advertising quality. Agency-standard layout. Print-ready sharpness.`,
   ].filter(Boolean);

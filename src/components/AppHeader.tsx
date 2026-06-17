@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { NotificationToggle } from "@/components/NotificationToggle";
 
 export function AppHeader() {
   return (
@@ -7,12 +8,15 @@ export function AppHeader() {
         <Link href="/" className="font-semibold tracking-tight text-lg">
           <span className="text-accent">◆</span> Meta Creatives Generator
         </Link>
-        <Link
-          href="/projects/new"
-          className="text-sm rounded-lg bg-accent px-4 py-2 font-medium text-white hover:opacity-90 transition"
-        >
-          + New project
-        </Link>
+        <div className="flex items-center gap-3">
+          <NotificationToggle />
+          <Link
+            href="/projects/new"
+            className="text-sm rounded-lg bg-accent px-4 py-2 font-medium text-white hover:opacity-90 transition"
+          >
+            + New project
+          </Link>
+        </div>
       </div>
     </header>
   );

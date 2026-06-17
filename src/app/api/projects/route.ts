@@ -18,8 +18,11 @@ export async function POST(req: NextRequest) {
   // Prompt-first intake: headlines are the mandatory core input. Headlines,
   // subheadlines and CTAs are all one-per-line. name/niche/service/offer are no
   // longer entered — they're derived by the pipeline's intake step.
-  const prompt = str(form, "prompt");
   const audience = str(form, "audience");
+  // Prompts are one-per-line; each is a per-creative brief. They're also combined into a
+  // single `prompt` string so the global stages (intake, business profile) see full context.
+  const providedPrompts = parseLines(str(form, "prompts"));
+  const combinedPrompt = providedPrompts.join("\n\n");
   const providedHeadlines = parseLines(str(form, "headlines"));
   const providedSubheadlines = parseLines(str(form, "subheadlines"));
   const providedCtas = parseLines(str(form, "ctas"));
@@ -29,11 +32,16 @@ export async function POST(req: NextRequest) {
   }
 
   const featureFounder = str(form, "featureFounder") === "true";
-  // Count defaults to the number of headlines and can be raised; it can't drop below.
-  const requested = parseInt(str(form, "creativeCount") || String(providedHeadlines.length), 10);
+  // Each creative = one prompt × one headline-pair (prompt-major). With no prompts it's one
+  // per headline. Count defaults to that full combination set and can be raised (extra slots
+  // get AI-written copy) but never below the headline count.
+  const comboCount = providedPrompts.length > 0
+    ? providedPrompts.length * providedHeadlines.length
+    : providedHeadlines.length;
+  const requested = parseInt(str(form, "creativeCount") || String(comboCount), 10);
   const creativeCount = Math.min(
     MAX_CREATIVES,
-    Math.max(providedHeadlines.length, Number.isFinite(requested) ? requested : providedHeadlines.length)
+    Math.max(providedHeadlines.length, Number.isFinite(requested) ? requested : comboCount)
   );
 
   const project = await prisma.project.create({
@@ -44,11 +52,12 @@ export async function POST(req: NextRequest) {
       service: "",
       offer: "",
       audience, // may be "" — intake infers it
-      prompt: prompt || null,
+      prompt: combinedPrompt || null,
       websiteUrl: str(form, "websiteUrl") || null,
       notes: str(form, "notes") || null,
       featureFounder,
       creativeCount,
+      providedPrompts: providedPrompts.length ? JSON.stringify(providedPrompts) : null,
       providedHeadlines: JSON.stringify(providedHeadlines),
       providedSubheadlines: providedSubheadlines.length ? JSON.stringify(providedSubheadlines) : null,
       providedCtas: providedCtas.length ? JSON.stringify(providedCtas) : null,

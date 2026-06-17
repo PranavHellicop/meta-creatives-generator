@@ -15,6 +15,12 @@ export async function POST(
   const project = await prisma.project.findUnique({ where: { id } });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+  // Clear any stale stop flag / prior error so a (re)generate starts from a clean slate.
+  await prisma.project.update({
+    where: { id },
+    data: { stopRequested: false, status: "idle", statusDetail: null, error: null },
+  });
+
   // Fire-and-forget: do not await — the long pipeline updates status in the DB.
   void runPipeline(id);
 

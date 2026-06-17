@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Pagination } from "@/components/Pagination";
+import { notificationsEnabled, showNotification, playPing } from "@/lib/notify";
+
+const TERMINAL = ["done", "error", "draft", "idle"];
 
 const CREATIVES_PER_PAGE = 12; // pagination only kicks in past a full batch
 
@@ -51,8 +54,11 @@ export function ProjectView({
 }) {
   const [data, setData] = useState<Status | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [page, setPage] = useState(1);
   const router = useRouter();
+  const prevStatusRef = useRef<string | null>(null); // last polled status (for completion detection)
+  const notifiedRef = useRef(false); // fire the finish notification at most once
 
   async function handleDelete() {
     if (!confirm(`Delete "${initialName}"? This permanently removes the project and its creatives.`)) return;
@@ -66,6 +72,16 @@ export function ProjectView({
     }
   }
 
+  async function handleStop() {
+    setStopping(true);
+    try {
+      await fetch(`/api/projects/${projectId}/stop`, { method: "POST" });
+      // The pipeline parks the project as a draft at its next checkpoint; polling picks it up.
+    } catch {
+      setStopping(false);
+    }
+  }
+
   useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
@@ -75,8 +91,29 @@ export function ProjectView({
         const res = await fetch(`/api/projects/${projectId}/status`, { cache: "no-store" });
         const json: Status = await res.json();
         if (!active) return;
+
+        // Fire a browser notification + ping when the run FINISHES (transition from an
+        // in-progress status to done/error). Not on a user-initiated stop (draft), and
+        // not when landing on an already-finished project (prev was null/terminal).
+        const prev = prevStatusRef.current;
+        const justFinished =
+          prev !== null && !TERMINAL.includes(prev) && (json.status === "done" || json.status === "error");
+        if (justFinished && !notifiedRef.current && notificationsEnabled()) {
+          notifiedRef.current = true;
+          if (json.status === "done") {
+            showNotification(
+              "Creatives ready ✅",
+              `${json.name || "Your project"} — ${json.creatives.length} creative${json.creatives.length === 1 ? "" : "s"} generated.`
+            );
+          } else {
+            showNotification("Generation failed", `${json.name || "Your project"} — something went wrong.`);
+          }
+          playPing();
+        }
+        prevStatusRef.current = json.status;
+
         setData(json);
-        if (json.status !== "done" && json.status !== "error") {
+        if (json.status !== "done" && json.status !== "error" && json.status !== "draft") {
           timer = setTimeout(poll, 2000);
         }
       } catch {
@@ -93,7 +130,10 @@ export function ProjectView({
   const status = data?.status ?? "idle";
   const done = status === "done";
   const errored = status === "error";
+  const isDraft = status === "draft";
+  const inProgress = !["done", "error", "draft", "idle"].includes(status);
   const currentIdx = ORDER.indexOf(status);
+  const readyCount = data?.creatives.filter((c) => c.finalUrl).length ?? 0;
 
   return (
     <div>
@@ -110,6 +150,34 @@ export function ProjectView({
               {data?.creatives.length} creatives ready
             </span>
           )}
+          {isDraft && (
+            <span className="text-sm rounded-full bg-amber-500/15 text-amber-400 px-3 py-1">Draft</span>
+          )}
+          {readyCount > 0 && (
+            <a
+              href={`/api/projects/${projectId}/download`}
+              className="text-sm rounded-lg border border-border px-3 py-1.5 text-foreground hover:border-accent/60 hover:text-accent transition"
+            >
+              Download all
+            </a>
+          )}
+          {inProgress && (
+            <button
+              onClick={handleStop}
+              disabled={stopping}
+              className="text-sm rounded-lg border border-border px-3 py-1.5 text-muted hover:border-amber-500/60 hover:text-amber-400 disabled:opacity-40 transition"
+            >
+              {stopping ? "Stopping…" : "Stop"}
+            </button>
+          )}
+          {isDraft && (
+            <Link
+              href={`/projects/${projectId}/edit`}
+              className="text-sm rounded-lg bg-accent px-3 py-1.5 font-medium text-white hover:opacity-90 transition"
+            >
+              Edit & regenerate
+            </Link>
+          )}
           <button
             onClick={handleDelete}
             disabled={deleting}
@@ -124,6 +192,15 @@ export function ProjectView({
         <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-4 mb-6">
           <p className="font-medium text-red-400 mb-1">Generation failed</p>
           <p className="text-sm text-muted">{data?.error}</p>
+        </div>
+      )}
+
+      {isDraft && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 mb-6">
+          <p className="font-medium text-amber-400 mb-1">Generation stopped — saved as a draft</p>
+          <p className="text-sm text-muted">
+            {`Your inputs${data && data.creatives.length > 0 ? " and any creatives generated so far" : ""} are kept. Edit & regenerate to pick up where you left off, or delete the draft.`}
+          </p>
         </div>
       )}
 

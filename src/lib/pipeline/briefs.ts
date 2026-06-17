@@ -13,8 +13,16 @@ import {
 
 const BriefBatchSchema = z.object({ briefs: z.array(CreativeBriefSchema) });
 
-// Per-angle copy the user supplied that must be honored (aligned by index to `angles`).
-export type CopyOverride = { headline?: string; subheadline?: string; ctas?: string[] };
+// Per-angle copy & brief the user supplied that must be honored (aligned by index to `angles`).
+// `requirement` is the operator's free-text prompt for this creative — it acts as the brief.
+// `designDirectives` are the explicit design instructions mined from that prompt (+ notes).
+export type CopyOverride = {
+  headline?: string;
+  subheadline?: string;
+  ctas?: string[];
+  requirement?: string;
+  designDirectives?: string;
+};
 
 export async function generateBriefs(
   angles: Angle[],
@@ -22,7 +30,8 @@ export async function generateBriefs(
   profile: BusinessProfile,
   market: MarketProfile,
   copyOverrides?: CopyOverride[],
-  referenceGuidance?: string
+  referenceGuidance?: string,
+  designDirectives?: string
 ): Promise<CreativeBrief[]> {
   const allowed = mode === "founder" ? FOUNDER_LAYOUTS : BANNER_LAYOUTS;
 
@@ -40,7 +49,8 @@ CRITICAL RULES:
 - layoutType MUST be one of: ${allowed.join(", ")}.
 - MAXIMIZE diversity across the set: vary layoutType, headline structure, emotion, and color emphasis. Avoid two similar creatives.
 - Keep colors on-brand using the brand palette, but vary which color leads each creative.
-- Some angles below specify a REQUIRED HEADLINE, REQUIRED SUBHEADLINE, and/or REQUIRED CTA(s). For those, you MUST use that exact text verbatim, and write the remaining copy to fit and support it. For angles with no requirement, write your own per the rules above.`;
+- Some angles below specify a REQUIRED HEADLINE, REQUIRED SUBHEADLINE, and/or REQUIRED CTA(s). For those, you MUST use that exact text verbatim, and write the remaining copy to fit and support it. For angles with no requirement, write your own per the rules above.
+- If OPERATOR DESIGN REQUIREMENTS are given below, they are explicit client instructions and take PRIORITY: reflect any stated colors in artDirection (primaryColor/accentColor), honor stated typography in typographyStyle, and respect any stated layout/placement in layoutType and visualConcept. Never contradict them.`;
 
   const user = `BRAND: ${profile.brandName} — ${profile.service}
 OFFER: ${profile.offer}
@@ -66,6 +76,12 @@ ${angles
     .map((a, i) => {
       let line = `${i + 1}. [${a.type}] ${a.hook} — ${a.rationale}`;
       const ov = copyOverrides?.[i];
+      if (ov?.requirement) {
+        line += `\n   CLIENT BRIEF (this creative MUST fulfill this — let it DRIVE the angle, copy emphasis, and visualConcept; only invent what it leaves unspecified): "${ov.requirement}"`;
+      }
+      if (ov?.designDirectives) {
+        line += `\n   DESIGN REQUIREMENTS FOR THIS CREATIVE (reflect in artDirection, typographyStyle, layoutType & visualConcept): ${ov.designDirectives}`;
+      }
       if (ov?.headline) {
         line += `\n   REQUIRED HEADLINE (use this exact text, verbatim, as the headline): "${ov.headline}"`;
       }
@@ -86,6 +102,9 @@ ${angles
 
 ${referenceGuidance
       ? `\nREFERENCE LAYOUT PATTERNS (learned from example creatives in this niche — apply the STRUCTURE & PLACEMENT only; do NOT copy any words, brands, or imagery from them):\n${referenceGuidance}\n`
+      : ""}
+${designDirectives?.trim()
+      ? `\nOPERATOR DESIGN REQUIREMENTS (explicit client instructions — honor these in every brief):\n${designDirectives.trim()}\n`
       : ""}
 Produce exactly ${angles.length} briefs in the same order. Use only allowed layouts: ${allowed.join(", ")}.
 Choose typographyStyle based on the niche recommendation above.`;
